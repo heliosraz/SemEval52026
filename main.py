@@ -9,7 +9,7 @@ import re
 # TODO: save results
 
 SYSTEM_PROMPT = ''' 
-You are a helpful assistant. Given a pre-context and a target sentence, please provide a score out of a continuous 5 point scale for how likely the story will have the given ending. You must provide you answer at the end of the response as so: SCORE: [score]
+You are a helpful assistant. Given a pre-context and a target sentence, please provide a score out of a five point scale for how likely the story will have the given ending. You must provide you answer at the end of the response as so: SCORE: [score]
 '''
 openai_api_key = "EMPTY"
 openai_api_base = "http://localhost:8000/v1"
