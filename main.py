@@ -1,22 +1,24 @@
-import vllm
 import json
-from tqdm import tqdm
+from tqdm.asyncio import tqdm
 from openai import OpenAI
-import re
-
-# TODO: load data
-# TODO: query model using openAI API
-# TODO: save results
+from pydantic import BaseModel, Field
 
 SYSTEM_PROMPT = ''' 
-You are a helpful assistant. Given a pre-context and a target sentence, please provide a score out of a five point scale for how likely the story will have the given ending. You must provide you answer at the end of the response as so: SCORE: [score]
+You are a helpful assistant. Given a pre-context and a target sentence, please provide a score out of a five point scale for how likely the story will have the given ending. You must provide your answer using JSON Schema with the following structure: thought, reasoning, and score (1-5).
 '''
-openai_api_key = "EMPTY"
-openai_api_base = "http://localhost:8000/v1"
-client = OpenAI(
-    api_key=openai_api_key,
-    base_url=openai_api_base,
-)
+
+class ScorePrediction(BaseModel):
+    thought: str
+    reasoning: str
+    score: int = Field(..., ge=1, le=5, description="Prediction score from 1 to 5")
+    
+format = {
+            "type": "json_schema", 
+            "json_schema": {
+                "name": "score_prediction",
+                "schema": ScorePrediction.model_json_schema(),
+                "strict": True}
+        }
 
 def template(precontext, target, ending):
     return f'''
@@ -25,25 +27,58 @@ TARGET SENTENCE: {target}
 ENDING: {ending}
 '''
 
-def load_data(path: int):
+def load_data(path: str):
     with open(path, "r") as fp:
         data = json.load(fp)
     return data
 
-def run(instance, client):
-    prompt = template(instance['precontext'],
-                instance['sentence'],
-                instance['ending'])
-    response = client.responses.create(
-                                        model="Qwen/Qwen3-0.6B",
-                                        instructions=SYSTEM_PROMPT,
-                                        input=prompt)
-    print("Completion result:", response)
-    return response.output_text
+import asyncio
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    api_key="EMPTY",
+    base_url="http://localhost:8000/v1"
+)
+status = 0
+
+async def run_async(instance, client):
+    prompt = template(instance[1]['precontext'],
+                    instance[1]['sentence'],
+                    instance[1]['ending'])
+    
+    response = await client.chat.completions.create(
+        model="Qwen/Qwen3-0.6B",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ],
+        response_format=format
+    )
+    
+    result = json.loads(response.choices[0].message.content)
+    return {"id": instance[0], "prediction": result["score"]}
+
+async def process_batch(instances, batch_size=32):
+    results = []
+    
+    for i in range(0, len(instances), batch_size):
+        batch = instances[i:i+batch_size]
+        tasks = [run_async(inst, client) for inst in batch]
+        batch_results = []
+        for f in tqdm.as_completed(tasks, total=len(tasks), desc="Processing tasks"):
+            result = await f
+            batch_results.append(result)
+        results.extend(batch_results)
+    
+    return results
 
 if __name__ == "__main__":
-    dp = "sample_data.json"
-    data = load_data(dp)
-    for instance in tqdm(data.values()):
-        result = run(instance, client)
-        print(result.split("SCORE: ")[-1], instance["average"])
+    data = load_data("./semeval26-05-scripts/data/dev.json")
+    instances = list(data.items())
+    
+    results = asyncio.run(process_batch(instances, batch_size=32))
+    with open("results/predictions.jsonl", "w") as fp:
+        for r in tqdm(results):
+            json.dump(r, fp)
+            fp.write("\n")
+        
