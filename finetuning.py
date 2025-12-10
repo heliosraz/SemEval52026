@@ -1,27 +1,16 @@
 from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
 from trl import SFTTrainer
-from peft import LoraConfig, get_peft_model, LoftQConfig
-import numpy as np
-import evaluate
+from peft import LoraConfig, get_peft_model
 
 import sys
-from tqdm import tqdm
-
-metric = evaluate.load("accuracy")
-
-def compute_metrics(eval_pred):
-    logits, labels = eval_pred
-    # convert the logits to their predicted class
-    predictions = np.argmax(logits, axis=-1)
-    return metric.compute(predictions=predictions, references=labels)
 
 def formatting_prompts_func(examples):
     system_prompt = "You are an AMR parser. Convert English sentences into Abstract Meaning Representation (AMR) graphs. Use proper AMR notation and formatting."
     texts = []
     for conversation in examples["conversations"]:
         messages = [
-        {" role ": " system " , " content ": system_prompt } ,
+        {"role": "system" , "content": system_prompt } ,
         conversation[0] , # user message
         conversation[1] # assistant message
         ]
@@ -50,6 +39,8 @@ if __name__=="__main__":
     
     base_model = AutoModelForCausalLM.from_pretrained(sys.argv[1])
     tokenizer = AutoTokenizer.from_pretrained(sys.argv[1])
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     dataset = dataset.map(formatting_prompts_func, batched = True)
     
     peft_model = get_peft_model(base_model, lora_config)
@@ -60,14 +51,19 @@ if __name__=="__main__":
         push_to_hub=False,
         num_train_epochs=10,
         warmup_steps=10,
-        gradient_accumulation_steps=128
+        gradient_accumulation_steps=128,
+        logging_steps=20,
+        save_strategy="epoch",
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        optim="adamw_torch_4bit"
     )
     trainer = SFTTrainer(
         model=peft_model,
         args=training_args,
+        processing_class=tokenizer,
         train_dataset=dataset["train"],
-        eval_dataset=dataset["test"],
-        compute_metrics=compute_metrics
+        eval_dataset=dataset["test"]
     )
     trainer.train()
     
