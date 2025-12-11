@@ -1,7 +1,7 @@
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from transformers import TrainingArguments
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 from data_processing import load_system_prompt
 
 import argparse
@@ -78,8 +78,7 @@ if __name__ == "__main__":
     
     peft_model = setup_lora(base_model)
     
-    training_args = TrainingArguments(
-        output_dir=args.output,
+    sft_config = SFTConfig(
         eval_strategy="epoch",
         push_to_hub=False,
         num_train_epochs=10,
@@ -89,12 +88,18 @@ if __name__ == "__main__":
         save_strategy="epoch",
         per_device_train_batch_size=1,
         per_device_eval_batch_size=1,
-        optim="adamw_8bit"
+        optim="adamw_8bit",
+        learning_rate = 2e-4,
+        weight_decay = 0.001,
+        lr_scheduler_type = "cosine",
+        seed = 3407,
+        output_dir = "outputs",
+        report_to = "none", # Use TrackIO/WandB etc
     )
     
     trainer = SFTTrainer(
         model=peft_model,
-        args=training_args,
+        args=sft_config,
         processing_class=tokenizer,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"]
