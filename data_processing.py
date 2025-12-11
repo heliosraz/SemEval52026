@@ -5,7 +5,7 @@ def load_data(path: str):
         data = json.load(fp)
     return data
 
-def load_system(path: str, id: str):
+def load_system_prompt(id: str, path: str = "data/system_prompt.jsonl"):
     with open(path, "r") as fp:
         data = json.load(fp)
 
@@ -17,8 +17,8 @@ def load_system(path: str, id: str):
     
 def prompt_template(precontext, target, ending):
     return f'''
-PRE-CONTEXT: {precontext}
-TARGET SENTENCE: {target}
-ENDING: {ending}
+    PRE-CONTEXT: {precontext}
+    TARGET SENTENCE: {target}
+    ENDING: {ending}
 '''
     
