@@ -1,22 +1,25 @@
-# SemEval2026
-# Task 5 --- Self Evaluation Scripts
+#!/usr/bin/env python3
+# SemEval2026 --- Task 5
 # OLLAMA implementation of self-evaluation preliminary
-# =============================================================================|
+# ===========================================================================|
+# Import Statements
 import argparse
-import os
 import json
 from tqdm import tqdm
 
 from ollama import generate
 from pydantic import BaseModel, Field
 
-from prompts import nl_template, sys_prompt_one
-# =============================================================================|
+from prompts import structured_template, nl_template, base_sys_prompt
+
+
+# ===========================================================================|
 # Data Model
 class PromptResponse(BaseModel):
     thought: str
     reasoning: str
     score: int = Field(..., ge=1, le=5, description="prediction from 1-5")
+
 
 fmt = {
             "type": "json_schema",
@@ -28,16 +31,16 @@ fmt = {
 }
 
 
-# =============================================================================|
+# ===========================================================================|
 # Generation loop
-def construct_response_function(**params) -> callable:
+def construct_response_function(model: str, **params) -> callable:
     """
     Closure encapsulating model parameters
     for iteration
     """
     def get_response(prompt: str):
         """Wrapper around ollama.generate to get a single response """
-        return generate(model=params["model"],
+        return generate(model=model,
                         prompt=prompt,
                         format=PromptResponse.model_json_schema(),
                         suffix=params["suffix"],
@@ -47,7 +50,7 @@ def construct_response_function(**params) -> callable:
     return get_response
 
 
-def generate_responses(instances, response_fn: callable):
+def generate_responses(instances: list[str], response_fn: callable):
     """
     full Response generator
     """
@@ -57,55 +60,48 @@ def generate_responses(instances, response_fn: callable):
         yield r.response
 
 
-# =============================================================================|
+# ===========================================================================|
 # Main
 def load_data(fp: str):
     with open(fp, 'r') as f:
-        data = json.load(f)
-        for item in list(data.items()):
-            yield item
+        yield from json.load(f)
+
 
 
 def main(args: dict):
     """"""
-    prompts = (nl_template(d[1]["precontext"],
+    model = args["model"]
+    for i, template in enumerate([nl_template, structured_template]):
+        prompts = (template(d[1]["precontext"],
                             d[1]["sentence"],
                             d[1]["ending"],
                             d[1]["homonym"],
                             d[1]["judged_meaning"])
-               for d in load_data(args["fp"]))
 
-    inference_fn = construct_response_function(**args)
+                   for d in load_data(args["input_fp"]))
+        inference_fn = construct_response_function(model, **args)
 
-    with open(args["out"], 'w') as o:
-        for doc in tqdm(iter(generate_responses(prompts, inference_fn))):
-            json.dump(doc, o)
-            o.write("\n")
+        with open(f"{model}.{i}.jsonl", 'w') as o:
+            for doc in tqdm(iter(generate_responses(prompts, inference_fn))):
+                obj = json.loads(doc)
+                json.dump(obj, o)
+                o.write("\n")
 
 
-# TODO logprobs + P(IK) head
-# TODO argparse / config implementation
-def parse_runtime_arguments(input_fp: str) -> dict:
+def parse_runtime_arguments() -> dict:
     parser = argparse.ArgumentParser()
-    parser.add_argument("-m", "--model",
-                        required=True)
-    parser.add_argument("--system_prompt")
     parser.add_argument("--think",
                         default=False)
     parser.add_argument("--suffix",
                         default="")
     parser.add_argument("-i", "--input_fp",
+                        required=True),
+    parser.add_argument("-m", "--model",
                         required=True)
-    parser.add_argument("-o", "--output_fp",
-                        required=True)
+    return vars(parser.parse_args())
 
 
 if __name__ == "__main__":
-    clargs = {"model": "deepseek-r1",
-              "system_prompt": sys_prompt_one(),
-              "think": False,
-              "suffix": "",
-              "fp": "data/sample_data.json",
-              "out": "results/deepseek.self_eval.prompt1.nl_template.run4.jsonl"
-              }
+    clargs = parse_runtime_arguments()
+    clargs["system_prompt"] = base_sys_prompt()
     main(clargs)

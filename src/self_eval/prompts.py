@@ -25,7 +25,7 @@ def nl_template(p,ts,e,tw,ps):
 # System Prompts
 
 # Prompt One --- Baseline
-def sys_prompt_one() -> str:
+def base_sys_prompt() -> str:
     return '''
     You are given:
     1. a story, consisting of a pre-context, target sentence, and ending
