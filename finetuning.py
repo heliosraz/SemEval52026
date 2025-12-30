@@ -7,16 +7,13 @@ import sys
 
 def formatting_prompts_func(examples):
     system_prompt = "You are an AMR parser. Convert English sentences into Abstract Meaning Representation (AMR) graphs. Use proper AMR notation and formatting."
-    texts = []
-    for conversation in examples["conversations"]:
+    for i, conversation in enumerate(examples["conversations"]):
         messages = [
         {"role": "system" , "content": system_prompt } ,
         conversation[0] , # user message
         conversation[1] # assistant message
         ]
-        text=tokenizer.apply_chat_template(messages, tokenize=False)
-        texts.append(text) 
-    return {"text": texts }
+        examples["conversation"][i]=tokenizer.apply_chat_template(messages, tokenize=False)
 
 
 if __name__=="__main__":
