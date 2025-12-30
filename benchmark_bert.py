@@ -2,6 +2,7 @@ from transformers import AutoTokenizer, AutoModel
 from load_data import make_dataset
 import torch
 import tqdm
+from sys import argv, exit
 
 
 def tokenize(tokenizer, data):
@@ -10,7 +11,9 @@ def tokenize(tokenizer, data):
 def get_all_offsets(context_toks, example_toks, data):
     context_targets = []
     example_targets = []
-    contexts, examples = context_toks['offset_mapping'], example_toks['offset_mapping']
+    contexts = context_toks.pop('offset_mapping')
+    examples = example_toks.pop('offset_mapping')
+    # for each data instance find the target word's offset
     for i, context, example in zip(range(len(data)), contexts, examples):
         instance = data.iloc[i]
         target = instance['homonym']
@@ -50,7 +53,14 @@ if __name__ == "__main__":
     model_name = "google-bert/bert-base-uncased"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name).to('cuda')
-    data = make_dataset('train.json')
+    
+    ## Data Processing
+    if len(argv)<1:
+        print("No data file was provided")
+        exit()
+    else:
+        data = make_dataset(argv[1])
+    
     context_toks = tokenize(tokenizer, data['context']).to('cuda')
     example_toks = tokenize(tokenizer, data['example_sentence']).to('cuda')
     # get list of target offsets for each data instance for both context and example
