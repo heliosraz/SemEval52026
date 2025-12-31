@@ -8,27 +8,24 @@ from sys import argv, exit
 def tokenize(tokenizer, data):
     return tokenizer(list(data), return_tensors='pt', padding=True, return_offsets_mapping=True)
 
-def get_all_offsets(context_toks, example_toks, data):
-    context_targets = []
-    example_targets = []
-    contexts = context_toks.pop('offset_mapping')
-    examples = example_toks.pop('offset_mapping')
+def get_all_offsets(data, **kwargs):
+    res = {}
     # for each data instance find the target word's offset
-    for i, context, example in zip(range(len(data)), contexts, examples):
-        instance = data.iloc[i]
-        target = instance['homonym']
-        # get this offset for this context
-        context_targets.append(find_offset(target, text=instance['context'], offsets=context))
-        # then for this example
-        example_targets.append(find_offset(target,text=instance['example_sentence'],offsets=example))
-    return context_targets, example_targets
+    for name, context in kwargs.items():
+        res[name] = []
+        instance_offsets = context.pop('offset_mapping')
+        for i, offsets in zip(range(len(data)), instance_offsets):
+            instance = data.iloc[i]
+            target = instance['homonym']
+            res[name].append(find_offset(target, text=instance[name], offsets=offsets))
+    return res.values()
 
 def find_offset(target:str, text:str, offsets:list):
     # locate start and end of word in text
     word_loc = text.find(target)
-    word_offsets = [word_loc, word_loc + len(target)]
+    word_offset = [word_loc, word_loc + len(target)]
     # do binary search to find token offsets containing end of word
-    return binary_search(offsets, word_offsets[1])
+    return binary_search(offsets, word_offset[1])
 
 def binary_search(offsets, value):
     low = 0
@@ -51,8 +48,9 @@ def obtain_final_embeddings(model_outputs, offsets):
 
 if __name__ == "__main__":
     model_name = "google-bert/bert-base-uncased"
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name).to('cuda')
+    model = AutoModel.from_pretrained(model_name).to(device)
     
     ## Data Processing
     if len(argv)<1:
@@ -61,8 +59,8 @@ if __name__ == "__main__":
     else:
         data = make_dataset(argv[1])
     
-    context_toks = tokenize(tokenizer, data['context']).to('cuda')
-    example_toks = tokenize(tokenizer, data['example_sentence']).to('cuda')
+    context_toks = tokenize(tokenizer, data['context']).to(device)
+    example_toks = tokenize(tokenizer, data['example_sentence']).to(device)
     # get list of target offsets for each data instance for both context and example
     context_offsets, example_offsets = get_all_offsets(context_toks, example_toks, data)
     # remove offsets from both tokenized datasets
@@ -90,6 +88,7 @@ if __name__ == "__main__":
         context_tensor = context_outputs.last_hidden_state[i, context_offsets[i],:]
         example_tensor = example_outputs.last_hidden_state[i, example_offsets[i],:]
         sim.append(cos(context_tensor,example_tensor) * 5)
+    sim = torch.array()
     print(sim[0])
     with open('results.txt', 'w') as f:
         f.writelines(sim)
