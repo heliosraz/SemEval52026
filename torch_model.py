@@ -3,7 +3,12 @@ from transformers import AutoModel, AutoTokenizer
 from benchmark_bert import get_all_offsets
 import tqdm
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+if torch.cuda.is_available():
+    device = torch.device("cuda") 
+elif torch.mps.is_available():
+    device = torch.device("mps")
+else: 
+    device = torch.device("cpu")
 class SimModel(torch.nn.Module):
 
     def __init__(self, hidden_size):
@@ -26,14 +31,20 @@ class BertModel(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.bert_layer = AutoModel.from_pretrained("google-bert/bert-base-cased")
-        self.tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased")
+        self.bert_layer = AutoModel.from_pretrained("google-bert/bert-base-cased").to(device)
+        self.tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased").to(device)
         self.cosine = torch.nn.CosineSimilarity(dim=0)
 
     def forward(self, data):
         # taken from benchmark_bert.py
-        context_toks = self.tokenizer(list(data['context']), return_tensors='pt', padding=True, return_offsets_mapping=True).to(device)
-        example_toks = self.tokenizer(list(data['example_sentence']), return_tensors='pt', padding=True, return_offsets_mapping=True).to(device)
+        context_toks = self.tokenizer(list(data['context']),
+                                    return_tensors='pt', 
+                                    padding=True,
+                                    return_offsets_mapping=True).to(device)
+        example_toks = self.tokenizer(list(data['example_sentence']),
+                                    return_tensors='pt', 
+                                    padding=True, 
+                                    return_offsets_mapping=True).to(device)
         # get list of target offsets for each data instance for both context and example
         context_offsets, example_offsets = get_all_offsets(context_toks, example_toks, data)
         # remove offsets from both tokenized datasets
