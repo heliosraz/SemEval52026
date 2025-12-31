@@ -6,6 +6,8 @@ from sys import argv, exit
 from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 
+from typing import List, Dict
+
 if torch.cuda.is_available():
     device = torch.device("cuda") 
 elif torch.mps.is_available():
@@ -16,16 +18,18 @@ else:
 def tokenize(tokenizer, data):
     return tokenizer(list(data), return_tensors='pt', padding=True, return_offsets_mapping=True)
 
-def get_all_offsets(data, **kwargs):
+def get_all_offsets(data:Dict, **kwargs):
     res = {}
-    # for each data instance find the target word's offset
-    for name, context in kwargs.items():
+    # for each offset type
+    # name (e.g. "example_sentence") and tok_outs (i.e. tokenizer outputs)
+    for name, tok_outs in kwargs.items():
         res[name] = []
-        instance_offsets = context.pop('offset_mapping')
-        for i, offsets in zip(range(len(data)), instance_offsets):
-            instance = data.iloc[i]
-            target = instance['homonym']
-            res[name].append(find_offset(target, text=instance[name], offsets=offsets))
+        offsets = tok_outs.pop('offset_mapping')
+        # for each data instance
+        for target, instance, instance_offsets in zip(data['homonym'], data[name], offsets):
+            res[name].append(find_offset(target, 
+                                        text=instance, 
+                                        offsets=instance_offsets))
     return res.values()
 
 def find_offset(target:str, text:str, offsets:list):
@@ -58,18 +62,18 @@ class ScoreModule(torch.nn.Module):
 
     def __init__(self, hidden_size):
         super().__init__()
-        self.linear1 = torch.nn.Linear(hidden_size, 1)
+        self.linear1 = torch.nn.Linear(1, hidden_size)
         self.activation = torch.nn.ReLU()
-        self.linear2 = torch.nn.Linear(5, hidden_size)
-        self.softmax = torch.nn.Softmax()
+        self.linear2 = torch.nn.Linear(hidden_size, 5)
+        self.softmax = torch.nn.Softmax(dim = 1)
 
     def forward(self, x):
         x = self.linear1(x)
         x = self.activation(x)
         x = self.linear2(x)
         x = self.softmax(x)
-        x = torch.argmax(x)
-        return x
+        y = torch.argmax(x, dim = 1)
+        return y
 
 class SimilarityModule(torch.nn.Module):
     # torch no grad should 
@@ -77,28 +81,32 @@ class SimilarityModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.bert_layer = AutoModel.from_pretrained("google-bert/bert-base-cased").to(device)
-        self.tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased").to(device)
+        self.tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased")
         self.cosine = torch.nn.CosineSimilarity(dim=0)
 
-    def forward(self, data):
+    def forward(self, data: Dict):
         # taken from benchmark_bert.py
         context_toks = self.tokenizer(list(data['context']),
                                     return_tensors='pt', 
                                     padding=True,
                                     return_offsets_mapping=True).to(device)
-        example_toks = self.tokenizer(list(data['sentence']),
+        example_toks = self.tokenizer(list(data['example_sentence']),
                                     return_tensors='pt', 
                                     padding=True, 
                                     return_offsets_mapping=True).to(device)
         # get list of target offsets for each data instance for both context and example
-        context_offsets, example_offsets = get_all_offsets(context_toks, example_toks, data)
+        context_offsets, example_offsets = get_all_offsets(data,
+                                                        context=context_toks,
+                                                        example_sentence=example_toks)
         context_outputs = self.bert_layer(**context_toks)
         example_outputs = self.bert_layer(**example_toks)
         sim = []
         for i in tqdm.tqdm(range(len(context_offsets))):
+            # finding contextual embedding of target
             context_tensor = context_outputs.last_hidden_state[i, context_offsets[i],:]
             example_tensor = example_outputs.last_hidden_state[i, example_offsets[i],:]
-            sim.append(self.cosine(context_tensor,example_tensor) * 5)
+            # calculate cosine similarity
+            sim.append(self.cosine(context_tensor,example_tensor)*5)
         return sim
     
 class CombinedModule(torch.nn.Module):
@@ -109,16 +117,26 @@ class CombinedModule(torch.nn.Module):
     def forward(self, data):
         with torch.no_grad():
             x = self.sim(data)
+        x = torch.Tensor(x)
+        x = torch.unsqueeze(x,1)
         x = self.scorer(x)
+        return x
         
 class WordSenseData(Dataset):
-    def __init__(self, data_dir):
-        self.data = pd.read_json(data_dir)
+    def __init__(self, data: pd.DataFrame):
+        self.data = data
+    def __len__(self):
+        return len(self.data)
+    def __getitem__(self, idx):
+        return {"index": self.data.loc[idx, 'index'],
+                "homonym": self.data.loc[idx, 'homonym'],
+                "context": self.data.loc[idx, 'context'],
+                "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
-def train(model, data: Dataset, n_epochs: int = 2):
+def train(model, data: List, n_epochs: int = 2):
     loader = DataLoader(data, 
-                        batch_size= 64, 
+                        batch_size=64, 
                         shuffle=True,)
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)
@@ -131,30 +149,36 @@ def train(model, data: Dataset, n_epochs: int = 2):
             loss.backward()
             optimizer.step()
 
-def run(model, data: Dataset):
-    batches = DataLoader(data, 
-                    batch_size= 64, 
-                    shuffle=True,)
-    for batch in batches:
-        y = model(batch)
-            
+def run(model, data: pd.DataFrame):
+    loader = DataLoader(data, 
+                    batch_size= 64,)
+    res = pd.DataFrame(columns = ["id", "prediction"])
+    with torch.no_grad():
+        for batch in loader:
+            y = pd.DataFrame(model(batch), columns=['prediction'])
+            y['id'] = batch['index']
+
+            res = pd.concat([res, y])
+    res["id"] = res["id"].astype("str")
+    res["prediction"] = res["prediction"].astype("int")
+    return res
+        
     
 
 if __name__ == "__main__":
     ## Data Processing
     if len(argv)<1:
-        print("No data file was provided")
-        exit()
+        print("No data file was provided.")
+        exit(1)
     else:
         data = load_data(argv[1])
-    y = data.loc[:, 'average']
-    X = data.loc[:, ['context', 'sentence']]
+    data = WordSenseData(data)
         
     ## Model Running
-    model = CombinedModule()
+    # model = CombinedModule()
+    model = SimilarityModule()
     # train(data)
-    sim = run(list(zip(X,y)))
+    sim = run(model, data)
     
     ## Saving Results
-    with open('results.txt', 'w') as f:
-        f.writelines(sim)
+    sim.to_json("predictions.jsonl",orient="records",lines=True)
