@@ -1,5 +1,5 @@
 from transformers import AutoTokenizer, AutoModel
-from load_data import make_dataset
+from load_data import load_data
 import torch
 import tqdm
 from sys import argv, exit
@@ -86,7 +86,7 @@ class SimilarityModule(torch.nn.Module):
                                     return_tensors='pt', 
                                     padding=True,
                                     return_offsets_mapping=True).to(device)
-        example_toks = self.tokenizer(list(data['example_sentence']),
+        example_toks = self.tokenizer(list(data['sentence']),
                                     return_tensors='pt', 
                                     padding=True, 
                                     return_offsets_mapping=True).to(device)
@@ -114,24 +114,29 @@ class CombinedModule(torch.nn.Module):
 class WordSenseData(Dataset):
     def __init__(self, data_dir):
         self.data = pd.read_json(data_dir)
-    def __getitem__(self, idx):
-        pass # TODO
         
 
-def train(model, data: Dataset, epochs: int = 2):
-    batches = DataLoader(data, 
+def train(model, data: Dataset, n_epochs: int = 2):
+    loader = DataLoader(data, 
                         batch_size= 64, 
                         shuffle=True,)
-    for _ in range(epochs):
-        for batch in batches:
-            pass # TODO
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)
+    model.train()
+    for epoch in range(n_epochs):
+        for X_batch, y_batch in loader:
+            y_pred = model(X_batch)
+            loss = loss_fn(y_pred, y_batch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
 def run(model, data: Dataset):
     batches = DataLoader(data, 
                     batch_size= 64, 
                     shuffle=True,)
     for batch in batches:
-        pass # TODO
+        y = model(batch)
             
     
 
@@ -141,9 +146,15 @@ if __name__ == "__main__":
         print("No data file was provided")
         exit()
     else:
-        data = WordSenseData(argv[1])
+        data = load_data(argv[1])
+    y = data.loc[:, 'average']
+    X = data.loc[:, ['context', 'sentence']]
+        
+    ## Model Running
     model = CombinedModule()
     # train(data)
-    sim = run(data)
+    sim = run(list(zip(X,y)))
+    
+    ## Saving Results
     with open('results.txt', 'w') as f:
         f.writelines(sim)
