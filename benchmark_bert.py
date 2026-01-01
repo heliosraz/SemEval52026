@@ -73,7 +73,8 @@ class ScoreModule(torch.nn.Module):
         x = self.linear2(x)
         x = self.softmax(x)
         y = torch.argmax(x, dim = 1)
-        return y
+        return y.to(device, dtype=torch.float)
+        #return float(y)
 
 class SimilarityModule(torch.nn.Module):
     # torch no grad should 
@@ -131,7 +132,7 @@ class WordSenseData(Dataset):
         return {"index": self.data.loc[idx, 'index'],
                 "homonym": self.data.loc[idx, 'homonym'],
                 "context": self.data.loc[idx, 'context'],
-                "example_sentence": self.data.loc[idx, 'example_sentence']}
+                "example_sentence": self.data.loc[idx, 'example_sentence']}, int(self.data.loc[idx, 'average'])
         
 
 def train(model, data: List, n_epochs: int = 2):
@@ -143,9 +144,10 @@ def train(model, data: List, n_epochs: int = 2):
     model.train()
     for epoch in range(n_epochs):
         for X_batch, y_batch in loader:
-            y_pred = model(X_batch)
-            loss = loss_fn(y_pred, y_batch)
+            y_pred = model(X_batch).to(device, dtype=torch.float)
+            loss = loss_fn(y_pred, y_batch.to(device, dtype=float))
             optimizer.zero_grad()
+            loss.requires_grad = True
             loss.backward()
             optimizer.step()
 
@@ -167,18 +169,20 @@ def run(model, data: pd.DataFrame):
 
 if __name__ == "__main__":
     ## Data Processing
+    print('test')
+    print(torch.cuda.get_device_name(torch.cuda.current_device()))
     if len(argv)<1:
         print("No data file was provided.")
         exit(1)
     else:
         data = load_data(argv[1])
     data = WordSenseData(data)
-        
+    torch.cuda.get_device_name(torch.cuda.current_device())
     ## Model Running
-    # model = CombinedModule()
-    model = SimilarityModule()
-    # train(data)
-    sim = run(model, data)
+    model = CombinedModule()
+    #model = SimilarityModule()
+    train(model, data)
+    # sim = run(model, data)
     
     ## Saving Results
-    sim.to_json("predictions.jsonl",orient="records",lines=True)
+    # sim.to_json("predictions.jsonl",orient="records",lines=True)
