@@ -1,10 +1,11 @@
 from transformers import AutoTokenizer, AutoModel
 from load_data import load_data
 import torch
-import tqdm
+from tqdm import tqdm
 from sys import argv, exit
 from torch.utils.data import DataLoader, Dataset
 import pandas as pd
+from safetensors.torch import save_file, safe_open
 
 from typing import List, Dict
 
@@ -73,8 +74,7 @@ class ScoreModule(torch.nn.Module):
         x = self.linear2(x)
         x = self.softmax(x)
         y = torch.argmax(x, dim = 1)
-        return y.to(device, dtype=torch.float)
-        #return float(y)
+        return y+1
 
 class SimilarityModule(torch.nn.Module):
     # torch no grad should 
@@ -102,7 +102,7 @@ class SimilarityModule(torch.nn.Module):
         context_outputs = self.bert_layer(**context_toks)
         example_outputs = self.bert_layer(**example_toks)
         sim = []
-        for i in tqdm.tqdm(range(len(context_offsets))):
+        for i in range(len(context_offsets)):
             # finding contextual embedding of target
             context_tensor = context_outputs.last_hidden_state[i, context_offsets[i],:]
             example_tensor = example_outputs.last_hidden_state[i, example_offsets[i],:]
@@ -110,18 +110,19 @@ class SimilarityModule(torch.nn.Module):
             sim.append(self.cosine(context_tensor,example_tensor)*5)
         return sim
     
-class CombinedModule(torch.nn.Module):
+class CoreModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.sim = SimilarityModule()
-        self.scorer = ScoreModule(12)
+        self.scorer = ScoreModule(48)
     def forward(self, data):
-        with torch.no_grad():
-            x = self.sim(data)
+        for param in self.sim.parameters():
+            param.require_grad = False
+        x = self.sim(data)
         x = torch.Tensor(x)
         x = torch.unsqueeze(x,1)
         x = self.scorer(x)
-        return x
+        return x.to(device, dtype=torch.float32)
         
 class WordSenseData(Dataset):
     def __init__(self, data: pd.DataFrame):
@@ -129,27 +130,64 @@ class WordSenseData(Dataset):
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        return {"index": self.data.loc[idx, 'index'],
+        return {"average": self.data.loc[idx, "average"],
+                "index": self.data.loc[idx, 'index'],
                 "homonym": self.data.loc[idx, 'homonym'],
                 "context": self.data.loc[idx, 'context'],
-                "example_sentence": self.data.loc[idx, 'example_sentence']}, int(self.data.loc[idx, 'average'])
+                "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
-def train(model, data: List, n_epochs: int = 2):
-    loader = DataLoader(data, 
-                        batch_size=64, 
+def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 10, batch_size = 64):
+    from datetime import datetime
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    train_loader = DataLoader(train_set, 
+                        batch_size=batch_size, 
                         shuffle=True,)
+    dev_loader = DataLoader(dev_set, 
+                        batch_size=batch_size)
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)
-    model.train()
-    for epoch in range(n_epochs):
-        for X_batch, y_batch in loader:
-            y_pred = model(X_batch).to(device, dtype=torch.float)
-            loss = loss_fn(y_pred, y_batch.to(device, dtype=float))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    
+    best_vloss = 1_000_000.
+    for epoch in tqdm(range(n_epochs)):
+        running_loss = 0.0
+        model.train()
+        for batch in train_loader:
+            y_batch = batch.pop("average")
+            X_batch = batch
             optimizer.zero_grad()
+            y_pred = model(X_batch)
+            loss = loss_fn(y_pred, y_batch.to(device, dtype=torch.float32))
             loss.requires_grad = True
             loss.backward()
             optimizer.step()
+            running_loss += loss.item()
+            
+        avg_loss = running_loss/len(train_loader)
+        running_vloss = 0.0
+        model.eval()
+
+        # Disable gradient computation and reduce memory consumption.
+        with torch.no_grad():
+            for vdata in dev_loader:
+                vlabels = vdata.pop("average")
+                vinputs = vdata
+                voutputs = model(vinputs)
+                vloss = loss_fn(voutputs, vlabels.to(device, dtype=torch.float32))
+                running_vloss += vloss
+
+        avg_vloss = running_vloss/len(dev_loader)
+        print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
+
+        # Track best performance, and save the model's state
+        if avg_vloss < best_vloss:
+            best_vloss = avg_vloss
+            model_path = 'models/ambert_{}_{}.safetensors'.format(timestamp,
+                                                                epoch)
+            save_model(model, model_path)
+            
+    return model_path
 
 def run(model, data: pd.DataFrame):
     loader = DataLoader(data, 
@@ -157,32 +195,35 @@ def run(model, data: pd.DataFrame):
     res = pd.DataFrame(columns = ["id", "prediction"])
     with torch.no_grad():
         for batch in loader:
-            y = pd.DataFrame(model(batch), columns=['prediction'])
+            y = pd.DataFrame(model(batch).cpu(), columns=['prediction'])
             y['id'] = batch['index']
-
             res = pd.concat([res, y])
     res["id"] = res["id"].astype("str")
     res["prediction"] = res["prediction"].astype("int")
     return res
         
-    
+def save_model(model, model_path="model.safetensors"):
+    state_dict = model.state_dict()
+    save_file(state_dict, model_path)
 
 if __name__ == "__main__":
     ## Data Processing
-    print('test')
-    print(torch.cuda.get_device_name(torch.cuda.current_device()))
-    if len(argv)<1:
+    if len(argv)<2:
         print("No data file was provided.")
         exit(1)
     else:
-        data = load_data(argv[1])
-    data = WordSenseData(data)
-    torch.cuda.get_device_name(torch.cuda.current_device())
-    ## Model Running
-    model = CombinedModule()
-    #model = SimilarityModule()
-    train(model, data)
-    # sim = run(model, data)
+        train_set = load_data(argv[1])
+        dev_set = load_data(argv[2])
+    train_set = WordSenseData(train_set)
+    dev_set = WordSenseData(dev_set)
     
-    ## Saving Results
-    # sim.to_json("predictions.jsonl",orient="records",lines=True)
+    ## Model Running
+    model = CoreModule()
+    #model = SimilarityModule()
+    train(model, train_set, dev_set)
+    # model = AutoModel.from_pretrained("ambert", 
+    #                                 local_files_only = True).to(device)
+    # res = run(model, dev_set)
+    
+    # ## Saving Results
+    # res.to_json("predictions.jsonl",orient="records",lines=True)
