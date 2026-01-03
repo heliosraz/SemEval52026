@@ -5,7 +5,7 @@ from tqdm import tqdm
 from sys import argv, exit
 from torch.utils.data import DataLoader, Dataset
 import pandas as pd
-from safetensors.torch import save_file, safe_open
+from safetensors.torch import save_file, load_model
 import os
 
 os.makedirs("models", exist_ok = True)
@@ -69,7 +69,6 @@ class ScoreModule(torch.nn.Module):
         self.linear1 = torch.nn.Linear(1, hidden_size)
         self.activation = torch.nn.ReLU()
         self.linear2 = torch.nn.Linear(hidden_size, 5)
-        self.softmax = torch.nn.Softmax(dim = 1)
 
     def forward(self, x):
         x = self.linear1(x)
@@ -115,7 +114,7 @@ class CoreModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.sim = SimilarityModule()
-        self.scorer = ScoreModule(48)
+        self.scorer = ScoreModule(128)
     def forward(self, data):
         for param in self.sim.parameters():
             param.requires_grad = False
@@ -138,7 +137,7 @@ class WordSenseData(Dataset):
                 "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
-def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 10, batch_size = 64):
+def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size = 64):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
@@ -148,7 +147,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 10, batch
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs)):
@@ -160,7 +159,8 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 10, batch
             X_batch = batch
             optimizer.zero_grad()
             y_pred = model(X_batch)
-            loss = loss_fn(y_pred, y_batch.to(device, dtype=torch.float32))
+            loss = loss_fn(y_pred, y_batch.to(device,
+                                            dtype=torch.long))
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -170,16 +170,21 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 10, batch
         model.eval()
 
         # Disable gradient computation and reduce memory consumption.
+        acc = 0
         with torch.no_grad():
             for vdata in dev_loader:
                 vlabels = vdata.pop("average")
+                vlabels = torch.Tensor(vlabels)-1
                 vinputs = vdata
                 voutputs = model(vinputs)
-                vloss = loss_fn(voutputs, vlabels.to(device, dtype=torch.float32))
+                vloss = loss_fn(voutputs, vlabels.to(device,
+                                                    dtype=torch.long))
+                acc += sum([a==b for a, b in zip(torch.argmax(voutputs, dim = 1), vlabels.to(dtype=torch.long))])
                 running_vloss += vloss
 
         avg_vloss = running_vloss/len(dev_loader)
         print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
+        print('ACCURACY valid {}'.format(acc/len(dev_set)))
 
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
@@ -196,7 +201,8 @@ def run(model, data: pd.DataFrame):
     res = pd.DataFrame(columns = ["id", "prediction"])
     with torch.no_grad():
         for batch in loader:
-            y = pd.DataFrame(model(batch).cpu(), columns=['prediction'])
+            pred = torch.argmax(model(batch), dim=1)
+            y = pd.DataFrame(pred.cpu(), columns=['prediction'])
             y['id'] = batch['index']
             res = pd.concat([res, y])
     res["id"] = res["id"].astype("str")
@@ -221,10 +227,9 @@ if __name__ == "__main__":
     ## Model Running
     model = CoreModule()
     #model = SimilarityModule()
-    train(model, train_set, dev_set)
-    # model = AutoModel.from_pretrained("ambert", 
-    #                                 local_files_only = True).to(device)
-    # res = run(model, dev_set)
+    # train(model, train_set, dev_set)
+    load_model(model, "models/ambert_20260102_192920_50.safetensors")
+    res = run(model, dev_set)
     
-    # ## Saving Results
-    # res.to_json("predictions.jsonl",orient="records",lines=True)
+    ## Saving Results
+    res.to_json("predictions.jsonl",orient="records",lines=True)
