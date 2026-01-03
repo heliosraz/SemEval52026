@@ -6,6 +6,9 @@ from sys import argv, exit
 from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 from safetensors.torch import save_file, safe_open
+import os
+
+os.makedirs("models", exist_ok = True)
 
 from typing import List, Dict
 
@@ -72,9 +75,7 @@ class ScoreModule(torch.nn.Module):
         x = self.linear1(x)
         x = self.activation(x)
         x = self.linear2(x)
-        x = self.softmax(x)
-        y = torch.argmax(x, dim = 1)
-        return y+1
+        return x
 
 class SimilarityModule(torch.nn.Module):
     # torch no grad should 
@@ -117,7 +118,7 @@ class CoreModule(torch.nn.Module):
         self.scorer = ScoreModule(48)
     def forward(self, data):
         for param in self.sim.parameters():
-            param.require_grad = False
+            param.requires_grad = False
         x = self.sim(data)
         x = torch.Tensor(x)
         x = torch.unsqueeze(x,1)
@@ -155,11 +156,11 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 10, batch
         model.train()
         for batch in train_loader:
             y_batch = batch.pop("average")
+            y_batch = torch.Tensor(y_batch)-1
             X_batch = batch
             optimizer.zero_grad()
             y_pred = model(X_batch)
             loss = loss_fn(y_pred, y_batch.to(device, dtype=torch.float32))
-            loss.requires_grad = True
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
