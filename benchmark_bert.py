@@ -64,16 +64,23 @@ def obtain_final_embeddings(model_outputs, offsets):
 
 class ScoreModule(torch.nn.Module):
 
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_sizes=[]):
         super().__init__()
-        self.linear1 = torch.nn.Linear(1, hidden_size)
-        self.activation = torch.nn.ReLU()
-        self.linear2 = torch.nn.Linear(hidden_size, 5)
+        if hidden_sizes:
+            self.linear = [torch.nn.Linear(1, hidden_sizes[0]).to(device)]
+            for h_i, h_j in zip(hidden_sizes, hidden_sizes[1:]):
+                self.linear.append(torch.nn.Linear(h_i, h_j).to(device))
+            self.linear.append(torch.nn.Linear(hidden_sizes[-1], 5).to(device))
+        else:
+            self.linear = [torch.nn.Linear(1, 5).to(device)]
+        self.activation = torch.nn.ReLU().to(device)
+        
 
     def forward(self, x):
-        x = self.linear1(x)
-        x = self.activation(x)
-        x = self.linear2(x)
+        for layer in self.linear[:-1]:
+            x = layer(x)
+            x = self.activation(x)
+        x = self.linear[-1](x)
         return x
 
 class SimilarityModule(torch.nn.Module):
@@ -83,7 +90,7 @@ class SimilarityModule(torch.nn.Module):
         super().__init__()
         self.bert_layer = AutoModel.from_pretrained("google-bert/bert-base-cased").to(device)
         self.tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased")
-        self.cosine = torch.nn.CosineSimilarity(dim=0)
+        self.cosine = torch.nn.CosineSimilarity(dim=1)
 
     def forward(self, data: Dict):
         # taken from benchmark_bert.py
@@ -102,24 +109,20 @@ class SimilarityModule(torch.nn.Module):
         context_outputs = self.bert_layer(**context_toks)
         example_outputs = self.bert_layer(**example_toks)
         sim = []
-        for i in range(len(context_offsets)):
-            # finding contextual embedding of target
-            context_tensor = context_outputs.last_hidden_state[i, context_offsets[i],:]
-            example_tensor = example_outputs.last_hidden_state[i, example_offsets[i],:]
-            # calculate cosine similarity
-            sim.append(self.cosine(context_tensor,example_tensor)*5)
+        context_tensor = context_outputs.last_hidden_state[torch.arange(0, context_outputs.last_hidden_state.shape[0]), context_offsets, :]
+        example_tensor = example_outputs.last_hidden_state[torch.arange(0, example_outputs.last_hidden_state.shape[0]), example_offsets,:]
+        sim = self.cosine(context_tensor, example_tensor)
         return sim
     
 class CoreModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.sim = SimilarityModule()
-        self.scorer = ScoreModule(128)
+        self.scorer = ScoreModule([256])
     def forward(self, data):
         for param in self.sim.parameters():
             param.requires_grad = False
         x = self.sim(data)
-        x = torch.Tensor(x)
         x = torch.unsqueeze(x,1)
         x = self.scorer(x)
         return x.to(device, dtype=torch.float32)
@@ -147,7 +150,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
     
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs)):
@@ -189,7 +192,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
             best_vloss = avg_vloss
-            model_path = 'models/ambert_{}_{}.safetensors'.format(timestamp,
+            model_path = 'models/ambirt_{}_{}.safetensors'.format(timestamp,
                                                                 epoch)
             save_model(model, model_path)
             
@@ -226,9 +229,10 @@ if __name__ == "__main__":
     
     ## Model Running
     model = CoreModule()
-    #model = SimilarityModule()
-    # train(model, train_set, dev_set)
-    load_model(model, "models/ambert_20260102_192920_50.safetensors")
+    # model = SimilarityModule()
+    # model_path = train(model, train_set, dev_set)
+    model_path = "/Users/local/Documents/GitHub/SemEval52026/models/ambirt_20260103_005628_0.safetensors"
+    load_model(model, model_path)
     res = run(model, dev_set)
     
     ## Saving Results
