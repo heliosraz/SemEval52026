@@ -168,54 +168,24 @@ class NoSimScoreModule(torch.nn.Module):
 
 class NoSimCoreModule(torch.nn.Module):
 # TODO: figure out embed size by deciding on how to combine sbert embeddings
-    # for now it's just 
+    # for now it's just subtraction so embed_dim = 384
     
-    def __init__(self, device, hidden_size=256):
+    def __init__(self, device, hidden_size=128):
+        super().__init__()
         self.device = device
         self.sentence_embed = NoSimSentenceModule(device=self.device, model_name ='all-MiniLM-L6-v2')
-        self.scorer = NoSimScoreModule
+        self.scorer = NoSimScoreModule(device=self.device, embed_size = 384, hidden_size=hidden_size)
+        
 
-
-
-
-## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
-class NoSimSentenceModule(torch.nn.Module):
-    # sentence embedding module without similarity 
-    def __init__(self, device, model_name='all-MiniLM-L6-v2'):
-        super().__init__()
-        self.device = device
-        self.sbert_model = SentenceTransformer(model_name, device=self.device)
-
-    def forward(self,data:Dict):
-        context_embeds = self.sbert_model.encode(list(data['context']), convert_to_tensor=True).to(self.device)
-        example_embeds = self.sbert_model.encode(list(data['example_sentence']), convert_to_tensor=True).to(self.device)
-        return context_embeds, example_embeds
-
-class NoSimScoreModule(torch.nn.Module):
-    # embed size tbd based on combining sbert embeds
-    # TODO: FIGURE OUT EMBED SIZE
-    def __init__(self, device, embed_size, hidden_size):
-        super().__init__()
-        self.device = device
-        self.linear1 = torch.nn.Linear(embed_size, hidden_size).to(self.device)
-        self.activation = torch.nn.ReLU().to(self.device)
-        self.linear2 = torch.nn.Linear(hidden_size, 5).to(self.device)
-    
-    def forward(self, x):
-        x = self.linear1(x)
-        x = self.activation(x)
-        x = self.linear2(x)
+    def forward(self, data):
+        for param in self.sentence_embed.parameters():
+            param.requires_grad = False
+        contexts, examples = self.sentence_embed(data)
+        # TODO: decide if this is a good way to combine them. for now its just subtraction 
+        x = contexts - examples
+        # x = torch.unsqueeze(x, 1)
+        x = self.scorer(x)
         return x
-
-class NoSimCoreModule(torch.nn.Module):
-# TODO: figure out embed size by deciding on how to combine sbert embeddings
-    # for now it's just 
-    
-    def __init__(self, device, hidden_size=256):
-        self.device = device
-        self.sentence_embed = NoSimSentenceModule(device=self.device, model_name ='all-MiniLM-L6-v2')
-        self.scorer = NoSimScoreModule
-
 
 
 
