@@ -53,33 +53,29 @@ def binary_search(offsets, value):
 
 class ScoreModule(torch.nn.Module):
 
-    def __init__(self, hidden_sizes=[],device='cpu'):
+    def __init__(self, hidden_sizes=[]):
         super().__init__()
-        self.device = device
         if hidden_sizes:
-            self.linear = [torch.nn.Linear(1, hidden_sizes[0]).to(self.device)]
+            layers = [torch.nn.Linear(1, hidden_sizes[0])]
             for h_i, h_j in zip(hidden_sizes, hidden_sizes[1:]):
-                self.linear.append(torch.nn.Linear(h_i, h_j).to(self.device))
-            self.linear.append(torch.nn.Linear(hidden_sizes[-1], 5).to(self.device))
+                layers.append(torch.nn.Linear(h_i, h_j))
+                torch.nn.init.xavier_uniform_(self.layers[-1].weight, gain=5.0)
+                layers.append(torch.nn.ReLU())
+                layers.append(torch.nn.BatchNorm1d(h_j))
+            layers.append(torch.nn.Linear(hidden_sizes[-1], 5))
+            self.layers = torch.nn.Sequential(*layers)
         else:
-            self.linear = [torch.nn.Linear(1, 5).to(self.device)]
-        self.activation = torch.nn.ReLU().to(self.device)
+            self.layers = torch.nn.Sequential(torch.nn.Linear(1, 5))
+            torch.nn.init.xavier_uniform_(self.layers[-1].weight, gain=5.0)
         
 
     def forward(self, x):
-        for layer in self.linear[:-1]:
-            x = layer(x)
-            x = self.activation(x)
-        x = self.linear[-1](x)
-        return x
+        return self.layers(x)
 
 class SimilarityModule(torch.nn.Module):
-    # torch no grad should 
-
-    def __init__(self, device):
+    def __init__(self):
         super().__init__()
-        self.device = device
-        self.bert_layer = AutoModel.from_pretrained("google-bert/bert-base-cased").to(self.device)
+        self.bert_layer = AutoModel.from_pretrained("google-bert/bert-base-cased")
         self.tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased")
         self.cosine = torch.nn.CosineSimilarity(dim=1)
 
@@ -88,18 +84,17 @@ class SimilarityModule(torch.nn.Module):
         context_toks = self.tokenizer(list(data['context']),
                                     return_tensors='pt', 
                                     padding=True,
-                                    return_offsets_mapping=True).to(self.device)
+                                    return_offsets_mapping=True).to(device)
         example_toks = self.tokenizer(list(data['example_sentence']),
                                     return_tensors='pt', 
                                     padding=True, 
-                                    return_offsets_mapping=True).to(self.device)
+                                    return_offsets_mapping=True).to(device)
         # get list of target offsets for each data instance for both context and example
         context_offsets, example_offsets = get_all_offsets(data,
                                                         context=context_toks,
                                                         example_sentence=example_toks)
         context_outputs = self.bert_layer(**context_toks)
         example_outputs = self.bert_layer(**example_toks)
-        sim = []
         context_tensor = context_outputs.last_hidden_state[torch.arange(0, context_outputs.last_hidden_state.shape[0]), context_offsets, :]
         example_tensor = example_outputs.last_hidden_state[torch.arange(0, example_outputs.last_hidden_state.shape[0]), example_offsets,:]
         sim = self.cosine(context_tensor, example_tensor)
@@ -115,25 +110,24 @@ class Sentence_SimModule(torch.nn.Module):
         self.sbert_model = SentenceTransformer(model_name, device=self.device)
 
     def forward(self,data:Dict):
-        context_embeds = self.sbert_model.encode(list(data['context']), convert_to_tensor=True).to(self.device)
-        example_embeds = self.sbert_model.encode(list(data['example_sentence']), convert_to_tensor=True).to(self.device)
+        context_embeds = self.sbert_model.encode(list(data['context']),
+                                                convert_to_tensor=True).to(self.device)
+        example_embeds = self.sbert_model.encode(list(data['example_sentence']),
+                                                convert_to_tensor=True).to(self.device)
         # 'similarity_pairwise' bc otherwise it's every context with every example
         sim = self.sbert_model.similarity_pairwise(context_embeds, example_embeds).to(self.device)
         return sim
 
 
-
-
 class CoreModule(torch.nn.Module):
 
-    def __init__(self, device, use_sbert:bool = False):
+    def __init__(self, use_sbert:bool = False):
         super().__init__()
-        self.device = device
         if use_sbert:
             self.sim = Sentence_SimModule(device, model_name='all-MiniLM-l6-v2')
         else:
-            self.sim = SimilarityModule(device)
-        self.scorer = ScoreModule([256], device)
+            self.sim = SimilarityModule()
+        self.scorer = ScoreModule()
 
     def forward(self, data):
         for param in self.sim.parameters():
@@ -141,7 +135,48 @@ class CoreModule(torch.nn.Module):
         x = self.sim(data)
         x = torch.unsqueeze(x,1)
         x = self.scorer(x)
-        return x.to(self.device, dtype=torch.float32)
+        return x
+
+## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
+class NoSimSentenceModule(torch.nn.Module):
+    # sentence embedding module without similarity 
+    def __init__(self, device, model_name='all-MiniLM-L6-v2'):
+        super().__init__()
+        self.device = device
+        self.sbert_model = SentenceTransformer(model_name, device=self.device)
+
+    def forward(self,data:Dict):
+        context_embeds = self.sbert_model.encode(list(data['context']), convert_to_tensor=True).to(self.device)
+        example_embeds = self.sbert_model.encode(list(data['example_sentence']), convert_to_tensor=True).to(self.device)
+        return context_embeds, example_embeds
+
+class NoSimScoreModule(torch.nn.Module):
+    # embed size tbd based on combining sbert embeds
+    # TODO: FIGURE OUT EMBED SIZE
+    def __init__(self, device, embed_size, hidden_size):
+        super().__init__()
+        self.device = device
+        self.linear1 = torch.nn.Linear(embed_size, hidden_size).to(self.device)
+        self.activation = torch.nn.ReLU().to(self.device)
+        self.linear2 = torch.nn.Linear(hidden_size, 5).to(self.device)
+    
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.activation(x)
+        x = self.linear2(x)
+        return x
+
+class NoSimCoreModule(torch.nn.Module):
+# TODO: figure out embed size by deciding on how to combine sbert embeddings
+    # for now it's just 
+    
+    def __init__(self, device, hidden_size=256):
+        self.device = device
+        self.sentence_embed = NoSimSentenceModule(device=self.device, model_name ='all-MiniLM-L6-v2')
+        self.scorer = NoSimScoreModule
+
+
+
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
 class NoSimSentenceModule(torch.nn.Module):
