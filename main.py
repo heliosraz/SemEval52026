@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
-from models import CoreModule
+from models import CoreModule, NoSimCoreModule
 
 os.makedirs("models", exist_ok = True)
 
@@ -93,9 +93,9 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                 voutputs = model(vinputs)
                 vloss = loss_fn(voutputs, vlabels.to(device,
                                                     dtype=torch.long))
-                print(voutputs)
-                print(torch.argmax(voutputs, dim = 1))
-                print(vlabels)
+                #print(voutputs)
+                #print(torch.argmax(voutputs, dim = 1))
+                #print(vlabels)
                 acc += sum([a==b for a, b in zip(torch.argmax(voutputs, dim = 1), vlabels.to(dtype=torch.long))])
                 running_vloss += vloss
 
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     train_set = WordSenseData(train_set)
     dev_set = WordSenseData(dev_set)
     ## Model Running
-    model = CoreModule().to(device)
+    model = NoSimCoreModule(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
     #model_path = "/Users/local/Documents/GitHub/SemEval52026/models/ambirt_20260103_005628_0.safetensors"
