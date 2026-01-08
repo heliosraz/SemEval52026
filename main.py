@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
-from models import CoreModule
+import models
 
 os.makedirs("models", exist_ok = True)
 
@@ -54,7 +54,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
             y_batch = batch.pop("average")
             y_batch = torch.Tensor(y_batch)-1
             y_batch = y_batch.to(device,
-                                            dtype=torch.long)
+                                dtype=torch.long)
             X_batch = batch
             optimizer.zero_grad()
             y_pred = model(X_batch)
@@ -73,12 +73,12 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
             optimizer.step()
             running_loss += loss.item()
         
-        print("=== Gradient Check ===")
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                print(f"{name}: grad is None? {param.grad is None}")
-                if param.grad is not None:
-                    print(f"  grad mean: {param.grad.mean()}, grad std: {param.grad.std()}")
+        # print("=== Gradient Check ===")
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         print(f"{name}: grad is None? {param.grad is None}")
+        #         if param.grad is not None:
+        #             print(f"  grad mean: {param.grad.mean()}, grad std: {param.grad.std()}")
         avg_loss = running_loss/len(train_loader)
         running_vloss = 0.0
         model.eval()
@@ -93,9 +93,6 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                 voutputs = model(vinputs)
                 vloss = loss_fn(voutputs, vlabels.to(device,
                                                     dtype=torch.long))
-                print(voutputs)
-                print(torch.argmax(voutputs, dim = 1))
-                print(vlabels)
                 acc += sum([a==b for a, b in zip(torch.argmax(voutputs, dim = 1), vlabels.to(dtype=torch.long))])
                 running_vloss += vloss
 
@@ -141,7 +138,7 @@ if __name__ == "__main__":
     train_set = WordSenseData(train_set)
     dev_set = WordSenseData(dev_set)
     ## Model Running
-    model = CoreModule().to(device)
+    model = models.SimilarityScoreModule().to(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
     #model_path = "/Users/local/Documents/GitHub/SemEval52026/models/ambirt_20260103_005628_0.safetensors"
