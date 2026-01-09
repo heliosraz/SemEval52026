@@ -9,7 +9,7 @@ from safetensors.torch import save_file, load_model
 import os
 import models
 
-os.makedirs("models", exist_ok = True)
+os.makedirs("checkpoint", exist_ok = True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
 
 from typing import List, Dict
@@ -29,6 +29,7 @@ class WordSenseData(Dataset):
         return len(self.data)
     def __getitem__(self, idx):
         return {"average": self.data.loc[idx, "average"],
+                "stdev": self.data.loc[idx, "stdev"],
                 "index": self.data.loc[idx, 'index'],
                 "homonym": self.data.loc[idx, 'homonym'],
                 "context": self.data.loc[idx, 'context'],
@@ -36,7 +37,7 @@ class WordSenseData(Dataset):
                 "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
-def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size = 16):
+def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size = 1):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
@@ -49,6 +50,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
     
     best_vloss = 1_000_000.
+    best_vacc = 0.
     for epoch in tqdm(range(n_epochs)):
         running_loss = 0.0
         model.train()
@@ -75,37 +77,39 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
             optimizer.step()
             running_loss += loss.item()
         
-        print("=== Gradient Check ===")
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                print(f"{name}: grad is None? {param.grad is None}")
-                if param.grad is not None:
-                    print(f"  grad mean: {param.grad.mean()}, grad std: {param.grad.std()}")
+        # print("=== Gradient Check ===")
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         print(f"{name}: grad is None? {param.grad is None}")
+        #         if param.grad is not None:
+        #             print(f"  grad mean: {param.grad.mean()}, grad std: {param.grad.std()}")
         avg_loss = running_loss/len(train_loader)
         running_vloss = 0.0
         model.eval()
 
         # Disable gradient computation and reduce memory consumption.
-        acc = 0
+        correct = 0
         with torch.no_grad():
             for vdata in dev_loader:
-                vlabels = vdata.pop("average")
+                vlabels = vdata["average"].to(device,
+                                            dtype=torch.long)
+                vrange = vdata["stdev"]
                 vlabels = torch.Tensor(vlabels)-1
                 vinputs = vdata
                 voutputs = model(vinputs)
-                vloss = loss_fn(voutputs, vlabels.to(device,
-                                                    dtype=torch.long))
-                acc += sum([a==b for a, b in zip(torch.argmax(voutputs, dim = 1), vlabels.to(dtype=torch.long))])
+                vloss = loss_fn(voutputs, vlabels)
+                correct += sum([b-std<=a<=b+std for a, b, std in zip(torch.argmax(voutputs, dim = 1).float().tolist(), vlabels.float().tolist(), vrange.float().tolist())])
                 running_vloss += vloss
 
         avg_vloss = running_vloss/len(dev_loader)
+        vacc = correct/len(dev_set)
         print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-        print('ACCURACY valid {}'.format(acc/len(dev_set)))
+        print('ACCURACY valid {}'.format(vacc))
 
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
             best_vloss = avg_vloss
-            model_path = 'models/ambirt_{}_{}.safetensors'.format(timestamp,
+            model_path = 'checkpoint/ambirt_{}_{}.safetensors'.format(timestamp,
                                                                 epoch)
             save_model(model, model_path)
             
@@ -140,8 +144,8 @@ if __name__ == "__main__":
     train_set = WordSenseData(train_set)
     dev_set = WordSenseData(dev_set)
     ## Model Running
-    model = models.SimilarityScoreModule().to(device)
-    # model = models.CrossContentSimilarityModule().to(device)
+    # model = models.SimilarityScoreModule().to(device)
+    model = models.CrossContentSimilarityModule().to(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
     # model_path = "models/ambirt_20260108_133030_0.safetensors"

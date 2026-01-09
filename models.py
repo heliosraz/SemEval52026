@@ -170,12 +170,12 @@ class SimilarityScoreModule(torch.nn.Module):
     
 class CrossContentSimilarityModule(torch.nn.Module):
     def __init__(self,
-                cformer_name = "sentence-transformers/all-MiniLM-L6-v2",
+                model_name = "sentence-transformers/all-MiniLM-L6-v2",
                 max_length = 512):
         super().__init__()
         self.max_length = max_length
-        self.context_former = ContextEmbedModule(model_name = cformer_name, max_length = max_length)
-        self.sentence_former = SentenceEmbedModule(model_name = cformer_name)
+        self.context_former = ContextEmbedModule(model_name = model_name, max_length = max_length)
+        self.sentence_former = SentenceEmbedModule(model_name = model_name)
         
         for model in [self.context_former, self.sentence_former]:
             for param in model.parameters():
