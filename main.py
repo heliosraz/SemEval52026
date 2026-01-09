@@ -8,6 +8,10 @@ import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
 import models
+'''
+To run script:
+python main.py "sentence-transformers/all-roberta-large-v1" data/train.json data/dev.json
+'''
 
 os.makedirs("checkpoint", exist_ok = True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
@@ -37,7 +41,7 @@ class WordSenseData(Dataset):
                 "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
-def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size = 1):
+def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size = 8):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
@@ -47,7 +51,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
     best_vloss = 1_000_000.
     best_vacc = 0.
@@ -109,7 +113,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
             best_vloss = avg_vloss
-            model_path = 'checkpoint/ambirt_{}_{}.safetensors'.format(timestamp,
+            model_path = 'checkpoint/{}_{}_{}.safetensors'.format(base_model.split("/")[-1], timestamp,
                                                                 epoch)
             save_model(model, model_path)
             
@@ -136,16 +140,18 @@ def save_model(model, model_path="model.safetensors"):
 if __name__ == "__main__":
     ## Data Processing
     if len(argv)<2:
-        print("No data file was provided.")
+        print("No data file or model was provided.")
         exit(1)
     else:
-        train_set = load_data(argv[1])
-        dev_set = load_data(argv[2])
+        base_model = argv[1]
+        train_set = load_data(argv[2])
+        dev_set = load_data(argv[3])
     train_set = WordSenseData(train_set)
     dev_set = WordSenseData(dev_set)
+
     ## Model Running
     # model = models.SimilarityScoreModule().to(device)
-    model = models.CrossContentSimilarityModule().to(device)
+    model = models.CrossContentSimilarityModule(base_model).to(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
     # model_path = "models/ambirt_20260108_133030_0.safetensors"
@@ -153,4 +159,4 @@ if __name__ == "__main__":
     res = run(model, dev_set)
     
     ## Saving Results
-    res.to_json("predictions.jsonl",orient="records",lines=True)
+    res.to_json(f"predictions-{base_model.split("/")[-1]}.jsonl",orient="records",lines=True)
