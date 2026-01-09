@@ -220,3 +220,5 @@ __marimo__/
 semeval26-05-scripts
 .vscode
 models
+checkpoint
+predictions.jsonl
