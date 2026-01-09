@@ -10,6 +10,7 @@ import os
 import models
 
 os.makedirs("models", exist_ok = True)
+os.environ["TOKENIZERS_PARALLELISM"] = "False"
 
 from typing import List, Dict
 
@@ -31,6 +32,7 @@ class WordSenseData(Dataset):
                 "index": self.data.loc[idx, 'index'],
                 "homonym": self.data.loc[idx, 'homonym'],
                 "context": self.data.loc[idx, 'context'],
+                "judged_meaning": self.data.loc[idx, "judged_meaning"],
                 "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
@@ -73,12 +75,12 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
             optimizer.step()
             running_loss += loss.item()
         
-        # print("=== Gradient Check ===")
-        # for name, param in model.named_parameters():
-        #     if param.requires_grad:
-        #         print(f"{name}: grad is None? {param.grad is None}")
-        #         if param.grad is not None:
-        #             print(f"  grad mean: {param.grad.mean()}, grad std: {param.grad.std()}")
+        print("=== Gradient Check ===")
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                print(f"{name}: grad is None? {param.grad is None}")
+                if param.grad is not None:
+                    print(f"  grad mean: {param.grad.mean()}, grad std: {param.grad.std()}")
         avg_loss = running_loss/len(train_loader)
         running_vloss = 0.0
         model.eval()
@@ -115,7 +117,7 @@ def run(model, data: pd.DataFrame):
     res = pd.DataFrame(columns = ["id", "prediction"])
     with torch.no_grad():
         for batch in loader:
-            pred = torch.argmax(model(batch), dim=1)
+            pred = torch.argmax(model(batch), dim=1)+1
             y = pd.DataFrame(pred.cpu(), columns=['prediction'])
             y['id'] = batch['index']
             res = pd.concat([res, y])
@@ -139,9 +141,10 @@ if __name__ == "__main__":
     dev_set = WordSenseData(dev_set)
     ## Model Running
     model = models.SimilarityScoreModule().to(device)
+    # model = models.CrossContentSimilarityModule().to(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
-    #model_path = "/Users/local/Documents/GitHub/SemEval52026/models/ambirt_20260103_005628_0.safetensors"
+    # model_path = "models/ambirt_20260108_133030_0.safetensors"
     load_model(model, model_path)
     res = run(model, dev_set)
     
