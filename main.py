@@ -41,7 +41,7 @@ class WordSenseData(Dataset):
                 "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
-def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size = 8):
+def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size =16):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
@@ -61,12 +61,13 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         for batch in train_loader:
             y_batch = batch.pop("average")
             y_batch = torch.Tensor(y_batch)-1
-            y_batch = y_batch.to(device,
-                                dtype=torch.long)
+            y_batch = y_batch.to(
+                device,
+                dtype=torch.long).unsqueeze(1)
             X_batch = batch
             optimizer.zero_grad()
             y_pred = model(X_batch)
-            loss = loss_fn(y_pred, y_batch.to(device, dtype=torch.long))
+            loss = loss_fn(y_pred, y_batch)
             # print(f"loss: {loss.item()}")
             # print(f"loss requires_grad: {loss.requires_grad}")
             loss.backward()
@@ -95,14 +96,15 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         correct = 0
         with torch.no_grad():
             for vdata in dev_loader:
-                vlabels = vdata["average"].to(device,
-                                            dtype=torch.long)
+                vlabels = vdata["average"]
                 vrange = vdata["stdev"]
-                vlabels = torch.Tensor(vlabels)-1
+                vlabels = (torch.Tensor(vlabels)-1).to(
+                                        device,
+                                        dtype=torch.long).unsqueeze(1)
                 vinputs = vdata
                 voutputs = model(vinputs)
                 vloss = loss_fn(voutputs, vlabels)
-                correct += sum([b-std<=a<=b+std for a, b, std in zip(torch.argmax(voutputs, dim = 1).float().tolist(), vlabels.float().tolist(), vrange.float().tolist())])
+                correct += sum([b-std<=a<=b+std for a, b, std in zip(torch.argmax(voutputs, dim = 1).flatten().float().tolist(), vlabels.flatten().float().tolist(), vrange.float().tolist())])
                 running_vloss += vloss
 
         avg_vloss = running_vloss/len(dev_loader)
@@ -125,7 +127,7 @@ def run(model, data: pd.DataFrame):
     res = pd.DataFrame(columns = ["id", "prediction"])
     with torch.no_grad():
         for batch in loader:
-            pred = torch.argmax(model(batch), dim=1)+1
+            pred = torch.argmax(model(batch), dim=2)+1
             y = pd.DataFrame(pred.cpu(), columns=['prediction'])
             y['id'] = batch['index']
             res = pd.concat([res, y])
@@ -154,7 +156,7 @@ if __name__ == "__main__":
     model = models.CrossContentSimilarityModule(base_model).to(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
-    # model_path = "models/ambirt_20260108_133030_0.safetensors"
+    # model_path = "checkpoint/all-mpnet-base-v2_20260109_010623_49.safetensors"
     load_model(model, model_path)
     res = run(model, dev_set)
     

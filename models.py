@@ -187,12 +187,13 @@ class CrossContentSimilarityModule(torch.nn.Module):
         # context gets fed into bert to get contextual embeddings
         content_embed = self.context_former(data[select[0]])
         # example_sentence/definition fed into sbert to get pooled contextual embeddings
-        candidate_embed = self.sentence_former(data[select[1]]).unsqueeze(1)
+        candidate_embed = self.sentence_former(data[select[1]]).unsqueeze(-1)
         # get similarity of candidate with each of content_embed
-        similarities = self.sim(content_embed, candidate_embed)
+        # similarities = self.sim(content_embed, candidate_embed)
+        similarities = torch.bmm(content_embed, candidate_embed).transpose(1,2)
         # feed similarities into scorer
         y = self.scorer(similarities)
-        return y
+        return y.transpose(1,2)
         
 class GeneralistModel(torch.nn.Module):
     def __init__(self,
