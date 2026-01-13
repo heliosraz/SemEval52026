@@ -5,6 +5,7 @@ import torch
 from bisect import bisect
 from typing import List, Dict
 import sys
+import math
 
 
 if torch.cuda.is_available():
@@ -78,12 +79,15 @@ class ContextEmbedModule(torch.nn.Module):
                 res.append(word_off_ind-1)
         return torch.Tensor(res).long()
     
-    def forward(self, data, include_offsets = False):
-        tokens = self.tokenizer(data,
-                                return_tensors='pt',
-                                padding = "max_length",
-                                max_length = self.max_length,
-                                return_offsets_mapping=include_offsets).to(device)
+    def forward(self, data, include_offsets = False, tokenize = True):
+        if tokenize:
+            tokens = self.tokenizer(data,
+                                    return_tensors='pt',
+                                    padding = "max_length",
+                                    max_length = self.max_length,
+                                    return_offsets_mapping=include_offsets).to(device)
+        else:
+            tokens = data
         if include_offsets:
             offsets = tokens.pop("offset_mapping")
         else:
@@ -174,7 +178,8 @@ class SimilarityScoreModule(torch.nn.Module):
 class CrossContentSimilarityModule(torch.nn.Module):
     def __init__(self,
                 model_name = "sentence-transformers/all-MiniLM-L6-v2",
-                max_length = 512):
+                max_length = 512,
+                train = False):
         super().__init__()
         self.max_length = max_length
         self.context_former = ContextEmbedModule(model_name = model_name, max_length = max_length)
@@ -212,51 +217,114 @@ class GeneralistModel(torch.nn.Module):
         n = self.model.get_embedding_size()
         self.K = torch.nn.Linear(n, n)
         self.Q = torch.nn.Linear(n, n)
-        self.V = torch.nn.Linear(max_length//2-1, 1)
-        self.sigmoid = torch.nn.Sigmoid()
+        self.V = torch.nn.Linear(n, 1)
+        self.fc1 = torch.nn.Linear(max_length, max_length)
+        self.dropout = torch.nn.Dropout(0.5)
         
-        
-    def forward(self, data:Dict, select = ["context", "judged_meaning"]):
-        input_seqs = []
-        sep_token = self.model.tokenizer.sep_token
-        pad_token = self.model.tokenizer.pad_token
-        for context, candidate in zip(list(data[select[0]]), list(data[select[1]])):
-            context_toks = self.model.tokenizer(context)["input_ids"]
-            candidate_toks = self.model.tokenizer(candidate)["input_ids"]
-            context = [context] + [pad_token]*max(self.max_length//2-len(context_toks)+1,0)
-            candidate = [candidate] + [pad_token]*max(self.max_length//2-len(candidate_toks),0)
-            seq = " ".join(candidate+[sep_token]+context)
-            input_seqs.append(seq)
+    def scaled_dot_product_attention(
+                        self,
+                        query,
+                        key,
+                        value,
+                        attn_mask=None,
+                        dropout_p=0.0,
+                        is_causal=False,
+                        scale=None,
+                        enable_gqa=False,
+                        training = False) -> torch.Tensor:
+        L, S = query.size(-2), key.size(-2)
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+        if is_causal:
+            assert attn_mask is None
+            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
 
-        data["separator"] = [sep_token]*len(data[select[0]])
-        data["input"] = input_seqs
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+            else:
+                attn_bias = attn_mask + attn_bias
+
+        if enable_gqa:
+            key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+            value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+
+        attn_weight = query @ key.transpose(-2, -1) * scale_factor
+        attn_weight += attn_bias
+        attn_weight = torch.sigmoid(attn_weight)
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=training)
+        return attn_weight @ value
         
+        
+    def forward(self, data:Dict, train = False, select = ["context", "judged_meaning"]):
+        data["sep"] = [self.model.tokenizer.sep_token]*len(data[select[0]])
+        sep_toks = self.model.tokenizer(
+                                data["sep"],
+                                return_tensors = "pt",
+                                padding = False).to(device)
+        sep_size = len(sep_toks["input_ids"][0])
+        candidate_toks = self.model.tokenizer(
+                                data[select[1]],
+                                return_tensors = "pt",
+                                padding = "max_length",
+                                max_length = self.max_length//2-sep_size).to(device)
+        context_toks = self.model.tokenizer(
+                                data[select[0]],
+                                return_tensors = "pt",
+                                padding = "max_length",
+                                max_length = self.max_length//2).to(device)
+        sep_toks["attention_mask"] = torch.zeros(
+                                        sep_toks["attention_mask"].shape).to(device)
+        input_seq = {}
+        input_seq["input_ids"] = torch.concat(
+                                        [candidate_toks["input_ids"],
+                                        sep_toks["input_ids"],
+                                        context_toks["input_ids"]],
+                                        axis = 1)
+        input_seq["attention_mask"] = torch.concat(
+                                        [candidate_toks["attention_mask"],
+                                        sep_toks["attention_mask"],
+                                        context_toks["attention_mask"]],
+                                        axis = 1)
         # separate by [SEP] and feed each into refiner
-        input_embeds, input_offsets= self.model(input_seqs, include_offsets = True)
-        sep_inds = self.model.get_offsets(data,
-                                        "input",
-                                        input_offsets,
-                                        tar_name = 'separator')
+        input_embeds = self.model(
+                                input_seq,
+                                include_offsets = False,
+                                tokenize = False)
+        sep_inds = [(len(candi), len(candi)+len(sep)) 
+                    for candi, sep in zip(
+                        candidate_toks["input_ids"],
+                        sep_toks["input_ids"])]
         
         context_embeds = []
         candidate_embeds = []
         for i in range(input_embeds.shape[0]):
-            sep_idx = sep_inds[i]
-            candidate_embeds.append(input_embeds[i, :sep_idx, :])
-            context_embeds.append(input_embeds[i, sep_idx+1:, :])
+            start, end = sep_inds[i]
+            candidate_embeds.append(input_embeds[i, :start, :])
+            context_embeds.append(input_embeds[i, end:, :])
         context_embeds = torch.stack(context_embeds)
         candidate_embeds = torch.stack(candidate_embeds)
         
         # feed into refiner
-        refined_context = self.K(context_embeds)
-        refined_candidate = self.Q(candidate_embeds)
+        refined_candidate = self.K(candidate_embeds)
+        refined_context = self.Q(context_embeds)
+        aggre_value = self.V(candidate_embeds)
+        attn_mask = torch.bmm(
+                        context_toks["attention_mask"].unsqueeze(2),
+                        candidate_toks["attention_mask"].unsqueeze(1)
+                        )
         
-        # dot product
-        similarity = torch.bmm(refined_candidate, refined_context.transpose(1,2))
-        similarity = self.sigmoid(similarity)
+        # scaled dot product with sigmoid
+        x = self.scaled_dot_product_attention(
+            query = refined_context,
+            key = refined_candidate,
+            value = aggre_value,
+            attn_mask = attn_mask,
+            dropout_p = 0.2,
+            training = train
+            )
         
-        # decode algo or scorer module
-        x = self.V(similarity.transpose(1,2))
         y = self.scorer(x.transpose(1,2))
         return y
 

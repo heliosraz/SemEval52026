@@ -54,20 +54,25 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     
     best_vloss = 1_000_000.
-    best_vacc = 0.
     for epoch in tqdm(range(n_epochs)):
+        tacc = 0
         running_loss = 0.0
         model.train()
         for batch in train_loader:
-            y_batch = batch.pop("average")
+            y_batch = batch["average"]
+            y_range = batch["stdev"]
             y_batch = torch.Tensor(y_batch)-1
             y_batch = y_batch.to(
-                device,
-                dtype=torch.long).unsqueeze(1)
+                    device,
+                    dtype=torch.long).unsqueeze(1)
             X_batch = batch
             optimizer.zero_grad()
-            y_pred = model(X_batch)
+            y_pred = model(X_batch, train = True)
             loss = loss_fn(y_pred.transpose(1,2), y_batch)
+            tacc += sum([b-std<=a<=b+std for a, b, std in zip(
+                    torch.argmax(y_pred, dim = 2).flatten().float().tolist(),
+                    y_batch.flatten().float().tolist(),
+                    y_range.float().tolist())])
             # print(f"loss: {loss.item()}")
             # print(f"loss requires_grad: {loss.requires_grad}")
             loss.backward()
@@ -93,7 +98,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         model.eval()
 
         # Disable gradient computation and reduce memory consumption.
-        correct = 0
+        vacc = 0
         with torch.no_grad():
             for vdata in dev_loader:
                 vlabels = vdata["average"]
@@ -104,13 +109,15 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                 vinputs = vdata
                 voutputs = model(vinputs)
                 vloss = loss_fn(voutputs.transpose(1,2), vlabels)
-                correct += sum([b-std<=a<=b+std for a, b, std in zip(torch.argmax(voutputs, dim = 1).flatten().float().tolist(), vlabels.flatten().float().tolist(), vrange.float().tolist())])
+                vacc += sum([b-std<=a<=b+std for a, b, std in zip(
+                    torch.argmax(voutputs, dim = 2).flatten().float().tolist(),
+                    vlabels.flatten().float().tolist(),
+                    vrange.float().tolist())])
                 running_vloss += vloss
 
         avg_vloss = running_vloss/len(dev_loader)
-        vacc = correct/len(dev_set)
-        print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-        print('ACCURACY valid {}'.format(vacc))
+        print('LOSS train {} dev {}'.format(avg_loss, avg_vloss))
+        print('ACCURACY train {} dev {}'.format(tacc/len(train_set), vacc/len(dev_set)))
 
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
