@@ -67,7 +67,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
             X_batch = batch
             optimizer.zero_grad()
             y_pred = model(X_batch)
-            loss = loss_fn(y_pred, y_batch)
+            loss = loss_fn(y_pred.transpose(1,2), y_batch)
             # print(f"loss: {loss.item()}")
             # print(f"loss requires_grad: {loss.requires_grad}")
             loss.backward()
@@ -103,7 +103,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                                         dtype=torch.long).unsqueeze(1)
                 vinputs = vdata
                 voutputs = model(vinputs)
-                vloss = loss_fn(voutputs, vlabels)
+                vloss = loss_fn(voutputs.transpose(1,2), vlabels)
                 correct += sum([b-std<=a<=b+std for a, b, std in zip(torch.argmax(voutputs, dim = 1).flatten().float().tolist(), vlabels.flatten().float().tolist(), vrange.float().tolist())])
                 running_vloss += vloss
 
@@ -141,9 +141,13 @@ def save_model(model, model_path="model.safetensors"):
 
 if __name__ == "__main__":
     ## Data Processing
-    if len(argv)<2:
-        print("No data file or model was provided.")
+    if len(argv)<3:
+        print("No data files were provided.")
         exit(1)
+    elif len(argv)==3:
+        base_model = ""
+        train_set = load_data(argv[1])
+        dev_set = load_data(argv[2])
     else:
         base_model = argv[1]
         train_set = load_data(argv[2])
@@ -152,9 +156,12 @@ if __name__ == "__main__":
     dev_set = WordSenseData(dev_set)
 
     ## Model Running
+    if base_model:
     # model = models.SimilarityScoreModule().to(device)
     # model = models.CrossContentSimilarityModule(base_model).to(device)
-    model = models.GeneralistModel(base_model).to(device)
+        model = models.GeneralistModel(base_model).to(device)
+    else:
+        model = models.GeneralistModel().to(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
     # model_path = "checkpoint/all-mpnet-base-v2_20260109_010623_49.safetensors"

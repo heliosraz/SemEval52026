@@ -57,6 +57,9 @@ class ContextEmbedModule(torch.nn.Module):
         self.max_length = max_length
         self.model = AutoModel.from_pretrained(model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
+    def get_embedding_size(self):
+        return self.model.config.hidden_size
         
     def get_offsets(self, data:Dict, feature_name, offsets, tar_name = 'homonym'):
         res = []
@@ -193,45 +196,68 @@ class CrossContentSimilarityModule(torch.nn.Module):
         similarities = torch.bmm(content_embed, candidate_embed).transpose(1,2)
         # feed similarities into scorer
         y = self.scorer(similarities)
-        return y.transpose(1,2)
+        return y
         
 class GeneralistModel(torch.nn.Module):
     def __init__(self,
-            model_name = "google-bert/bert-base-cased"):
+            model_name = "google-bert/bert-base-cased",
+            max_length = 512):
         super().__init__()
-        self.model = ContextEmbedModule(model_name = model_name)
+        self.model = ContextEmbedModule(model_name = model_name,
+                                        max_length = max_length)
         for param in self.model.parameters():
             param.requires_grad = False
-        self.scorer = ScoreModule(hidden_sizes = [128])
-        self.K = torch.nn.Linear()
-        self.Q = torch.nn.Linear()
-        self.V = torch.nn.Linear()
+        self.max_length = max_length
+        self.scorer = ScoreModule(input_len = self.max_length//2, hidden_sizes = [128])
+        n = self.model.get_embedding_size()
+        self.K = torch.nn.Linear(n, n)
+        self.Q = torch.nn.Linear(n, n)
+        self.V = torch.nn.Linear(max_length//2-1, 1)
+        self.sigmoid = torch.nn.Sigmoid()
         
         
-    def forward(self, data:Dict, select = ["context", "definition"]):
+    def forward(self, data:Dict, select = ["context", "judged_meaning"]):
         input_seqs = []
-        for context, candidate in zip(list(data[select[0]], list(data[select[1]]))):
-            input_seqs.append(candidate+" [SEP] "+context)
-        data["target"] = ["[SEP]"]*len(data[select[0]])
+        sep_token = self.model.tokenizer.sep_token
+        pad_token = self.model.tokenizer.pad_token
+        for context, candidate in zip(list(data[select[0]]), list(data[select[1]])):
+            context_toks = self.model.tokenizer(context)["input_ids"]
+            candidate_toks = self.model.tokenizer(candidate)["input_ids"]
+            context = [context] + [pad_token]*max(self.max_length//2-len(context_toks)+1,0)
+            candidate = [candidate] + [pad_token]*max(self.max_length//2-len(candidate_toks),0)
+            seq = " ".join(candidate+[sep_token]+context)
+            input_seqs.append(seq)
+
+        data["separator"] = [sep_token]*len(data[select[0]])
         data["input"] = input_seqs
         
-        input_embeds, input_offsets= self.embed(input_seqs, include_offsets = True)
         # separate by [SEP] and feed each into refiner
-        sep_inds = self.embed.get_offsets(data,
+        input_embeds, input_offsets= self.model(input_seqs, include_offsets = True)
+        sep_inds = self.model.get_offsets(data,
                                         "input",
                                         input_offsets,
-                                        tar_name = 'target')
-        context_embeds = input_embeds[:, :sep_inds, :]
-        candidate_embeds = input_embeds[:, sep_inds+1:, :]
+                                        tar_name = 'separator')
+        
+        context_embeds = []
+        candidate_embeds = []
+        for i in range(input_embeds.shape[0]):
+            sep_idx = sep_inds[i]
+            candidate_embeds.append(input_embeds[i, :sep_idx, :])
+            context_embeds.append(input_embeds[i, sep_idx+1:, :])
+        context_embeds = torch.stack(context_embeds)
+        candidate_embeds = torch.stack(candidate_embeds)
+        
         # feed into refiner
         refined_context = self.K(context_embeds)
         refined_candidate = self.Q(candidate_embeds)
+        
         # dot product
-        similarity = torch.bmm(refined_context, refined_candidate)
-        similarity = torch.nn.Sigmoid(similarity)
+        similarity = torch.bmm(refined_candidate, refined_context.transpose(1,2))
+        similarity = self.sigmoid(similarity)
+        
         # decode algo or scorer module
-        x = self.V(similarity)
-        y = self.scorer(x)
+        x = self.V(similarity.transpose(1,2))
+        y = self.scorer(x.transpose(1,2))
         return y
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
