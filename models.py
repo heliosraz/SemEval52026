@@ -92,7 +92,7 @@ class ContextEmbedModule(torch.nn.Module):
         else:
             return embeds
 
-class ContentOffsetModule(torch.nn.Module):
+class ContextOffsetModule(torch.nn.Module):
     # separate from BERT module to test this with different models (e.g. LLMs)
     def __init__(self, model_name = "google-bert/bert-base-cased"):
         super().__init__()
@@ -152,7 +152,7 @@ class SimilarityScoreModule(torch.nn.Module):
             for param in self.sim.parameters():
                 param.requires_grad = False
         else:
-            self.offset = ContentOffsetModule(model_name)
+            self.offset = ContextOffsetModule(model_name)
             self.sim = torch.nn.CosineSimilarity()
             for param in self.offset.parameters():
                 param.requires_grad = False
@@ -200,8 +200,10 @@ class GeneralistModel(torch.nn.Module):
             model_name = "google-bert/bert-base-cased"):
         super().__init__()
         self.model = ContextEmbedModule(model_name = model_name)
+        for param in self.model.parameters():
+            param.requires_grad = False
         self.scorer = ScoreModule(hidden_sizes = [128])
-        self.content_refiner = RefineModule()
+        self.context_refiner = RefineModule()
         self.candidate_refiner = RefineModule()
         
         
@@ -218,10 +220,14 @@ class GeneralistModel(torch.nn.Module):
                                         "input",
                                         input_offsets,
                                         tar_name = 'target')
-        context_embeds, candi_embeds = embed[:, :sep, :], embed[:, sep+1:, :]
+        context_embeds = input_embeds[:, :sep_inds, :]
+        candidate_embeds = input_embeds[:, sep_inds+1:, :]
+        # feed into refiner
+        refined_context = self.context_refiner(context_embeds)
+        refined_candidate = self.candidate_refiner(candidate_embeds)
         # dot product
         torch.einsum()
-        #decode algo or scorer module
+        # decode algo or scorer module
         return
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)

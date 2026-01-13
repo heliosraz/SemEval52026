@@ -153,7 +153,8 @@ if __name__ == "__main__":
 
     ## Model Running
     # model = models.SimilarityScoreModule().to(device)
-    model = models.CrossContentSimilarityModule(base_model).to(device)
+    # model = models.CrossContentSimilarityModule(base_model).to(device)
+    model = models.GeneralistModel(base_model).to(device)
     # model = SimilarityModule()
     model_path = train(model, train_set, dev_set)
     # model_path = "checkpoint/all-mpnet-base-v2_20260109_010623_49.safetensors"
