@@ -203,8 +203,9 @@ class GeneralistModel(torch.nn.Module):
         for param in self.model.parameters():
             param.requires_grad = False
         self.scorer = ScoreModule(hidden_sizes = [128])
-        self.context_refiner = RefineModule()
-        self.candidate_refiner = RefineModule()
+        self.K = torch.nn.Linear()
+        self.Q = torch.nn.Linear()
+        self.V = torch.nn.Linear()
         
         
     def forward(self, data:Dict, select = ["context", "definition"]):
@@ -223,12 +224,15 @@ class GeneralistModel(torch.nn.Module):
         context_embeds = input_embeds[:, :sep_inds, :]
         candidate_embeds = input_embeds[:, sep_inds+1:, :]
         # feed into refiner
-        refined_context = self.context_refiner(context_embeds)
-        refined_candidate = self.candidate_refiner(candidate_embeds)
+        refined_context = self.K(context_embeds)
+        refined_candidate = self.Q(candidate_embeds)
         # dot product
-        torch.einsum()
+        similarity = torch.bmm(refined_context, refined_candidate)
+        similarity = torch.nn.Sigmoid(similarity)
         # decode algo or scorer module
-        return
+        x = self.V(similarity)
+        y = self.scorer(x)
+        return y
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
 class NoSimSentenceModule(torch.nn.Module):
