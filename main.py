@@ -42,7 +42,7 @@ class WordSenseData(Dataset):
                 "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
-def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size =16):
+def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size=64):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
@@ -52,83 +52,87 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                         shuffle=True,)
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
-    loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=1e-4,
-        weight_decay=0.01)
+    # loss_fn = torch.nn.CrossEntropyLoss()
+    loss_fn = torch.nn.KLDivLoss(reduction="batchmean")
+    optimizer = torch.optim.AdamW([
+        {'params': model.K.parameters(), 'lr': 0.004, 'weigh_decay': 0.2},
+        {'params': model.Q.parameters(), 'lr': 0.004, 'weigh_decay': 0.2},
+        {'params': model.V.parameters(), 'lr': 0.004, 'weigh_decay': 0.2},
+        {'params': model.scorer.parameters(), 'lr': 0.01, 'weigh_decay': 0.01}
+        ],
+        betas=(0.7, 0.999))
     
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs)):
-        tacc = 0
+        if epoch<=10:
+            for layer in [model.K, model.Q, model.V]:
+                for param in layer.parameters():
+                    param.requires_grad = False
+        else:
+            for layer in [model.K, model.Q, model.V]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+        running_tacc = 0
         running_loss = 0.0
         model.train()
         for batch in train_loader:
-            y_batch = batch["average"]
-            y_range = batch["stdev"]
-            y_batch = (torch.Tensor(y_batch)-1).to(
-                                    device,
-                                    dtype=torch.long).unsqueeze(1)
-            y_batch = y_batch
+            y_batch = torch.Tensor(batch["average"])-1
+            y_stdev = torch.Tensor(batch["stdev"])
+            y_stdev = y_stdev.masked_fill(y_stdev==0,1e-20)
+            
+            y_probs = torch.exp(-0.5*((torch.arange(5).unsqueeze(0)-y_batch.unsqueeze(1))/y_stdev.unsqueeze(1))**2).float().to(device)
+            y_probs = y_probs / (y_probs.sum(dim=1, keepdim=True) + 1e-8)
+            
             X_batch = batch
             optimizer.zero_grad()
             y_pred = model(X_batch, train = True)
-            loss = loss_fn(y_pred.transpose(1,2), y_batch)
-            tacc += sum([b-std<=a<=b+std for a, b, std in zip(
-                    torch.argmax(y_pred, dim = 2).flatten().float().tolist(),
-                    y_batch.flatten().float().tolist(),
-                    y_range.float().tolist())])
-            # print(f"loss: {loss.item()}")
-            # print(f"loss requires_grad: {loss.requires_grad}")
+            loss = loss_fn(y_pred, y_probs)
             loss.backward()
-            # print(f"y_pred shape: {y_pred.shape}")
-            # print(f"y_pred sample: {y_pred[:3]}")  # First 3 predictions
-            # print(f"y_pred requires_grad: {y_pred.requires_grad}")
-
-            # print(f"y_batch shape: {y_batch.shape}")
-            # print(f"y_batch sample: {y_batch[:3]}")  # First 3 labels
-            # print(f"y_batch min/max: {y_batch.min()}/{y_batch.max()}")
 
             optimizer.step()
             running_loss += loss.item()
-        
-        # print("=== Gradient Check ===")
-        # for name, param in model.named_parameters():
-        #     if param.requires_grad:
-        #         print(f"{name}: grad is None? {param.grad is None}")
-        #         if param.grad is not None:
-        #             print(f"  grad mean: {param.grad.mean()}, grad std: {param.grad.std()}")
+            running_tacc += sum([b-std<=a<=b+std for a, b, std in zip(
+                            torch.argmax(
+                                y_pred,
+                                dim = 1).flatten().float().tolist(),
+                            y_batch.flatten().float().tolist(),
+                            y_stdev.float().tolist())])
+            
         avg_loss = running_loss/len(train_loader)
         running_vloss = 0.0
+        
         model.eval()
-
         # Disable gradient computation and reduce memory consumption.
-        vacc = 0
+        running_vacc = 0
         with torch.no_grad():
-            for vdata in dev_loader:
-                vlabels = vdata["average"]
-                vrange = vdata["stdev"]
-                vlabels = (torch.Tensor(vlabels)-1).to(
-                                        device,
-                                        dtype=torch.long).unsqueeze(1)
-                vinputs = vdata
-                voutputs = model(vinputs)
-                vloss = loss_fn(voutputs.transpose(1,2), vlabels)
-                vacc += sum([b-std<=a<=b+std for a, b, std in zip(
-                    torch.argmax(voutputs, dim = 2).flatten().float().tolist(),
-                    vlabels.flatten().float().tolist(),
-                    vrange.float().tolist())])
-                running_vloss += vloss
+            for v_data in dev_loader:
+                v_batch = torch.Tensor(v_data["average"])-1
+                v_stdev = torch.Tensor(v_data["stdev"])
+                v_stdev = v_stdev.masked_fill(v_stdev==0,1e-20)
+                
+                v_probs = torch.exp(-0.5*((torch.arange(5).unsqueeze(0)-v_batch.unsqueeze(1))/v_stdev.unsqueeze(1))**2).float().to(device)
+                v_probs = v_probs / (v_probs.sum(dim=1, keepdim=True) + 1e-8)
+                
+                v_inputs = v_data
+                v_outputs = model(v_inputs)
+                v_loss = loss_fn(v_outputs, v_probs)
+                running_vacc += sum([b-std<=a<=b+std for a, b, std in zip(
+                    torch.argmax(v_outputs, dim = 1).flatten().float().tolist(),
+                    v_batch.flatten().float().tolist(),
+                    v_stdev.float().tolist())])
+                running_vloss += v_loss
 
         avg_vloss = running_vloss/len(dev_loader)
         print('LOSS train {} dev {}'.format(avg_loss, avg_vloss))
-        print('ACCURACY train {} dev {}'.format(tacc/len(train_set), vacc/len(dev_set)))
+        print('ACCURACY train {} dev {}'.format(running_tacc/len(train_set), running_vacc/len(dev_set)))
 
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
             best_vloss = avg_vloss
-            model_path = 'checkpoint/{}_{}_{}.safetensors'.format(base_model.split("/")[-1], timestamp,
-                                                                epoch)
+            model_path = 'checkpoint/{}_{}_{}.safetensors'.format(
+                                        base_model.split("/")[-1],
+                                        timestamp,
+                                        epoch)
             save_model(model, model_path)
             
     return model_path

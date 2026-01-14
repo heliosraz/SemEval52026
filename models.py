@@ -26,15 +26,17 @@ class ScoreModule(torch.nn.Module):
             layers = [torch.nn.Linear(input_len, hidden_sizes[0])]
             for h_i, h_j in zip(hidden_sizes, hidden_sizes[1:]):
                 layers.append(torch.nn.Linear(h_i, h_j))
-                layers.append(torch.nn.Tanh())
-                layers.append(torch.nn.Dropout(0.2))
             layers.append(torch.nn.Linear(hidden_sizes[-1], 5))
-            self.layers = torch.nn.Sequential(*layers)
+            self.layers = torch.nn.ModuleList(layers)
         else:
-            self.layers = torch.nn.Sequential(torch.nn.Linear(input_len, 5))
+            self.layers = torch.nn.ModuleList([torch.nn.Linear(input_len, 5)])
             
-    def forward(self, x):
-        return self.layers(x)
+    def forward(self, x, drop_p=0.3, train = False):
+        for layer in self.layers[:-1]:
+            x = layer(x)
+            x = torch.tanh(x)
+            x = torch.dropout(x, drop_p, train = train)
+        return self.layers[-1](x)
 
 class RefineModule(torch.nn.Module):
     def __init__(self, input_len = 1, hidden_sizes=[]):
@@ -215,18 +217,13 @@ class GeneralistModel(torch.nn.Module):
         for param in self.model.parameters():
             param.requires_grad = False
         self.max_length = max_length
-        
-        sep_toks = self.model.tokenizer(
-                                "[SEP]",
-                                padding = False)
-        sep_size = len(sep_toks["input_ids"])
-        
-        self.scorer = ScoreModule(input_len = self.max_length//2-sep_size, hidden_sizes = [128])
         n = self.model.get_embedding_size()
-        self.K = torch.nn.Linear(n, n, bias=False)
-        self.Q = torch.nn.Linear(n, n, bias=False)
-        self.V = torch.nn.Linear(n, n, bias=False)
-        self.dropout = torch.nn.Dropout(0.2)
+        d_attn = 128
+        self.scorer = ScoreModule(input_len = d_attn, hidden_sizes = [])
+        self.K = torch.nn.Linear(n, d_attn, bias=False)
+        self.Q = torch.nn.Linear(n, d_attn, bias=False)
+        self.V = torch.nn.Linear(n, d_attn, bias=False)
+        self.dropout = torch.nn.Dropout(0.3)
         
     def scaled_dot_product_attention(
                         self,
@@ -234,11 +231,11 @@ class GeneralistModel(torch.nn.Module):
                         key,
                         value,
                         attn_mask=None,
-                        dropout_p=0.0,
+                        dropout_p=0.3,
                         is_causal=False,
                         scale=None,
                         enable_gqa=False,
-                        training = False) -> torch.Tensor:
+                        train = False) -> torch.Tensor:
         b, L, S = query.size(0), query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         attn_bias = torch.zeros(b, L, S, dtype=query.dtype, device=query.device)
@@ -249,10 +246,10 @@ class GeneralistModel(torch.nn.Module):
 
         if attn_mask is not None:
             if attn_mask.dtype == torch.bool:
-                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-1e9"))
             else:
                 attn_mask = attn_mask.bool()
-                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-1e9"))
 
         if enable_gqa:
             key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
@@ -260,8 +257,8 @@ class GeneralistModel(torch.nn.Module):
 
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
         attn_weight += attn_bias
-        attn_weight = torch.sigmoid(attn_weight)
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=training)
+        attn_weight = torch.softmax(attn_weight, dim = -1) 
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=train)
         return attn_weight @ value
         
         
@@ -321,7 +318,7 @@ class GeneralistModel(torch.nn.Module):
         attn_mask = torch.bmm(
                         candidate_toks["attention_mask"].unsqueeze(2),
                         context_toks["attention_mask"].unsqueeze(1)
-                        ).bool()
+                        )
         
         # scaled dot product with sigmoid
         x = self.scaled_dot_product_attention(
@@ -329,13 +326,13 @@ class GeneralistModel(torch.nn.Module):
             key = refined_context,
             value = aggre_value,
             attn_mask = attn_mask,
-            dropout_p = 0.2,
-            training = train
+            train = train
             )
         
         # x = self.dropout(x)
-        x_pooled = x.mean(dim=2)
-        y = self.scorer(x_pooled.unsqueeze(1))
+        x_pooled = x.mean(dim=1)
+        y = self.scorer(x_pooled, train=train)
+        y = torch.nn.functional.log_softmax(y, dim=1)
         return y
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
