@@ -6,6 +6,7 @@ from bisect import bisect
 from typing import List, Dict
 import sys
 import math
+import matplotlib.pyplot as plt
 
 
 if torch.cuda.is_available():
@@ -215,9 +216,9 @@ class GeneralistModel(torch.nn.Module):
         self.max_length = max_length
         self.scorer = ScoreModule(input_len = self.max_length//2, hidden_sizes = [128])
         n = self.model.get_embedding_size()
-        self.K = torch.nn.Linear(n, n)
-        self.Q = torch.nn.Linear(n, n)
-        self.V = torch.nn.Linear(n, 1)
+        self.K = torch.nn.Linear(n, n, bias=False)
+        self.Q = torch.nn.Linear(n, n, bias=False)
+        self.V = torch.nn.Linear(n, 1, bias=False)
         self.fc1 = torch.nn.Linear(max_length, max_length)
         self.dropout = torch.nn.Dropout(0.5)
         
@@ -232,9 +233,9 @@ class GeneralistModel(torch.nn.Module):
                         scale=None,
                         enable_gqa=False,
                         training = False) -> torch.Tensor:
-        L, S = query.size(-2), key.size(-2)
+        b, L, S = query.size(0), query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
-        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+        attn_bias = torch.zeros(b, L, S, dtype=query.dtype, device=query.device)
         if is_causal:
             assert attn_mask is None
             temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
@@ -244,7 +245,8 @@ class GeneralistModel(torch.nn.Module):
             if attn_mask.dtype == torch.bool:
                 attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
             else:
-                attn_bias = attn_mask + attn_bias
+                attn_mask = attn_mask.bool()
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
 
         if enable_gqa:
             key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
@@ -286,7 +288,7 @@ class GeneralistModel(torch.nn.Module):
                                         [candidate_toks["attention_mask"],
                                         sep_toks["attention_mask"],
                                         context_toks["attention_mask"]],
-                                        axis = 1)
+                                        axis = 1).bool()
         # separate by [SEP] and feed each into refiner
         input_embeds = self.model(
                                 input_seq,
@@ -313,7 +315,7 @@ class GeneralistModel(torch.nn.Module):
         attn_mask = torch.bmm(
                         context_toks["attention_mask"].unsqueeze(2),
                         candidate_toks["attention_mask"].unsqueeze(1)
-                        )
+                        ).bool()
         
         # scaled dot product with sigmoid
         x = self.scaled_dot_product_attention(

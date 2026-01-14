@@ -8,6 +8,7 @@ import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
 import models
+
 '''
 To run script:
 python main.py "sentence-transformers/all-roberta-large-v1" data/train.json data/dev.json
@@ -51,7 +52,10 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=1e-4,
+        weight_decay=0.1)
     
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs)):
@@ -61,10 +65,10 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         for batch in train_loader:
             y_batch = batch["average"]
             y_range = batch["stdev"]
-            y_batch = torch.Tensor(y_batch)-1
-            y_batch = y_batch.to(
-                    device,
-                    dtype=torch.long).unsqueeze(1)
+            y_batch = (torch.Tensor(y_batch)-1).to(
+                                    device,
+                                    dtype=torch.long).unsqueeze(1)
+            y_batch = y_batch
             X_batch = batch
             optimizer.zero_grad()
             y_pred = model(X_batch, train = True)
