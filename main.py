@@ -3,7 +3,7 @@ from load_data import load_data
 import torch
 from tqdm import tqdm
 from sys import argv, exit
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
@@ -46,6 +46,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
+    # train_set = Subset(train_set, range(200))
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
                         shuffle=True,)
@@ -55,7 +56,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=1e-4,
-        weight_decay=0.1)
+        weight_decay=0.01)
     
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs)):

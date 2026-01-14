@@ -27,10 +27,11 @@ class ScoreModule(torch.nn.Module):
             for h_i, h_j in zip(hidden_sizes, hidden_sizes[1:]):
                 layers.append(torch.nn.Linear(h_i, h_j))
                 layers.append(torch.nn.Tanh())
+                layers.append(torch.nn.Dropout(0.2))
             layers.append(torch.nn.Linear(hidden_sizes[-1], 5))
             self.layers = torch.nn.Sequential(*layers)
         else:
-            self.layers = torch.nn.Sequential(torch.nn.Linear(1, 5))
+            self.layers = torch.nn.Sequential(torch.nn.Linear(input_len, 5))
             
     def forward(self, x):
         return self.layers(x)
@@ -214,13 +215,18 @@ class GeneralistModel(torch.nn.Module):
         for param in self.model.parameters():
             param.requires_grad = False
         self.max_length = max_length
-        self.scorer = ScoreModule(input_len = self.max_length//2, hidden_sizes = [128])
+        
+        sep_toks = self.model.tokenizer(
+                                "[SEP]",
+                                padding = False)
+        sep_size = len(sep_toks["input_ids"])
+        
+        self.scorer = ScoreModule(input_len = self.max_length//2-sep_size, hidden_sizes = [128])
         n = self.model.get_embedding_size()
         self.K = torch.nn.Linear(n, n, bias=False)
         self.Q = torch.nn.Linear(n, n, bias=False)
-        self.V = torch.nn.Linear(n, 1, bias=False)
-        self.fc1 = torch.nn.Linear(max_length, max_length)
-        self.dropout = torch.nn.Dropout(0.5)
+        self.V = torch.nn.Linear(n, n, bias=False)
+        self.dropout = torch.nn.Dropout(0.2)
         
     def scaled_dot_product_attention(
                         self,
@@ -309,25 +315,27 @@ class GeneralistModel(torch.nn.Module):
         candidate_embeds = torch.stack(candidate_embeds)
         
         # feed into refiner
-        refined_candidate = self.K(candidate_embeds)
-        refined_context = self.Q(context_embeds)
-        aggre_value = self.V(candidate_embeds)
+        refined_context = self.K(context_embeds)
+        refined_candidate = self.Q(candidate_embeds)
+        aggre_value = self.V(context_embeds)
         attn_mask = torch.bmm(
-                        context_toks["attention_mask"].unsqueeze(2),
-                        candidate_toks["attention_mask"].unsqueeze(1)
+                        candidate_toks["attention_mask"].unsqueeze(2),
+                        context_toks["attention_mask"].unsqueeze(1)
                         ).bool()
         
         # scaled dot product with sigmoid
         x = self.scaled_dot_product_attention(
-            query = refined_context,
-            key = refined_candidate,
+            query = refined_candidate,
+            key = refined_context,
             value = aggre_value,
             attn_mask = attn_mask,
             dropout_p = 0.2,
             training = train
             )
         
-        y = self.scorer(x.transpose(1,2))
+        # x = self.dropout(x)
+        x_pooled = x.mean(dim=2)
+        y = self.scorer(x_pooled.unsqueeze(1))
         return y
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
