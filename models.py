@@ -223,6 +223,9 @@ class GeneralistModel(torch.nn.Module):
         self.K = torch.nn.Linear(n, d_attn, bias=False)
         self.Q = torch.nn.Linear(n, d_attn, bias=False)
         self.V = torch.nn.Linear(n, d_attn, bias=False)
+        torch.nn.init.eye_(self.K.weight)  
+        torch.nn.init.eye_(self.Q.weight) 
+        torch.nn.init.eye_(self.V.weight) 
         self.dropout = torch.nn.Dropout(0.3)
         
     def scaled_dot_product_attention(
@@ -316,8 +319,8 @@ class GeneralistModel(torch.nn.Module):
         refined_candidate = self.Q(candidate_embeds)
         aggre_value = self.V(context_embeds)
         attn_mask = torch.bmm(
-                        candidate_toks["attention_mask"].unsqueeze(2),
-                        context_toks["attention_mask"].unsqueeze(1)
+                        candidate_toks["attention_mask"].float().unsqueeze(2),
+                        context_toks["attention_mask"].float().unsqueeze(1)
                         )
         
         # scaled dot product with sigmoid
