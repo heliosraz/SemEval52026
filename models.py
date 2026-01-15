@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer, AutoModel
 from sentence_transformers import SentenceTransformer 
-from load_data import load_data
+from data_processing import load_data
 import torch
 from bisect import bisect
 from typing import List, Dict

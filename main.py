@@ -1,5 +1,5 @@
 from transformers import AutoTokenizer, AutoModel
-from load_data import load_data
+from data_processing import load_data
 import torch
 from tqdm import tqdm
 from sys import argv, exit
