@@ -10,6 +10,7 @@ import models
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
+import json
 
 
 '''
@@ -47,12 +48,16 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    # train_set = Subset(train_set, range(200))
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
                         shuffle=True,)
+    train_loss_record = []
+    train_acc_record = []
+    
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
+    dev_loss_record = []
+    dev_acc_record = []
     # loss_fn = torch.nn.CrossEntropyLoss()
     loss_fn = torch.nn.KLDivLoss(reduction="batchmean")
     optimizer = torch.optim.AdamW([
@@ -133,16 +138,32 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         avg_vloss = running_vloss/len(dev_loader)
         print('LOSS train {} dev {}'.format(avg_loss, avg_vloss))
         print('ACCURACY train {} dev {}'.format(running_tacc/len(train_set), running_vacc/len(dev_set)))
+        
+        train_loss_record.appendavg_loss()
+        train_acc_record.append(running_tacc/len(train_set))
+        dev_loss_record.append(avg_vloss)
+        dev_acc_record.append(running_vacc/len(dev_set))
 
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
+            
             best_vloss = avg_vloss
-            name = "{}_{}_{}".format(
+            model_name = "{}_{}_{}".format(
                                         base_model.split("/")[-1],
                                         timestamp,
                                         epoch)
-            model_path = 'checkpoint/{}/{}.safetensors'.format(name,name)
-            save_model(model, name, model_path)
+            model_dir = "checkpoint/{}".format(model_name)
+            os.makedirs(model_dir, exist_ok = True)
+            
+            metrics = {
+                "train": {
+                        "loss": train_loss_record,
+                        "acc": train_acc_record},
+                "dev": {
+                        "loss": dev_loss_record,
+                        "acc": dev_acc_record}}
+            
+            save_model(model, metrics, model_dir, model_name)
             plot_linear_weights(
                 [model.K.weight, model.Q.weight, model.V.weight],
                 ["K", "Q", "V"],
@@ -150,9 +171,8 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                 running_vacc/len(dev_set),
                 avg_loss,
                 avg_vloss,
-                "checkpoint/{}/{}.png".format(name,name)
+                os.path.join(model_dir,"{}.png".format(model_name,model_name))
                 )
-                
             
     return model_path
 
@@ -199,10 +219,17 @@ def plot_linear_weights(weights_list, layer_names, train_acc, dev_acc, train_los
     print(f"Figure saved to {save_path}")
     plt.close()
         
-def save_model(model, name = "model", model_path="model.safetensors"):
-    os.makedirs("checkpoint/{}".format(name), exist_ok = True)
+def save_model(
+                model,
+                metrics,
+                model_dir = "./checkpoint",
+                model_name = "model"):
+    model_fpath = os.path.join(model_dir,'{}.safetensors'.format(model_name,model_name))
+    model_mpath = os.path.join(model_dir,'{}_metrics.json'.format(model_name,model_name))
     state_dict = model.state_dict()
-    save_file(state_dict, model_path)
+    save_file(state_dict, model_fpath)
+    with open(model_mpath, "w") as f:
+        json.dump(metrics, f, indent = 4)
 
 if __name__ == "__main__":
     ## Data Processing
