@@ -34,7 +34,13 @@ class WordSenseData(Dataset):
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        return {key: self.data.loc[idx, key] for key in self.data.columns}
+        return {"average": self.data.loc[idx, "average"],
+                "stdev": self.data.loc[idx, "stdev"],
+                "index": self.data.loc[idx, 'index'],
+                "homonym": self.data.loc[idx, 'homonym'],
+                "context": self.data.loc[idx, 'context'],
+                "judged_meaning": self.data.loc[idx, "judged_meaning"],
+                "example_sentence": self.data.loc[idx, 'example_sentence']}
         
 
 def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size=64):
@@ -59,7 +65,6 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs),desc="Epochs:", position = 0):
-        print("EPOCH:", epoch)
         if epoch==0:
             for layer in [model.scorer]:
                 for param in layer.parameters():
