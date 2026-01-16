@@ -6,7 +6,6 @@ from bisect import bisect
 from typing import List, Dict
 import sys
 import math
-# import matplotlib.pyplot as plt
 
 
 if torch.cuda.is_available():
@@ -223,9 +222,9 @@ class GeneralistModel(torch.nn.Module):
         self.K = torch.nn.Linear(n, d_attn, bias=False)
         self.Q = torch.nn.Linear(n, d_attn, bias=False)
         self.V = torch.nn.Linear(n, d_attn, bias=False)
-        torch.nn.init.eye_(self.K.weight)  
-        torch.nn.init.eye_(self.Q.weight) 
-        torch.nn.init.eye_(self.V.weight) 
+        torch.nn.init.xavier_normal_(self.K.weight)  
+        torch.nn.init.xavier_normal_(self.Q.weight) 
+        torch.nn.init.xavier_normal_(self.V.weight) 
         self.dropout = torch.nn.Dropout(0.3)
         
     def scaled_dot_product_attention(

@@ -1,13 +1,16 @@
-from transformers import AutoTokenizer, AutoModel
 from data_processing import load_data
 import torch
 from tqdm import tqdm
 from sys import argv, exit
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
 import models
+import matplotlib.pyplot as plt
+import torch
+import numpy as np
+
 
 '''
 To run script:
@@ -16,8 +19,6 @@ python main.py "sentence-transformers/all-roberta-large-v1" data/train.json data
 
 os.makedirs("checkpoint", exist_ok = True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
-
-from typing import List, Dict
 
 if torch.cuda.is_available():
     device = torch.device("cuda") 
@@ -33,13 +34,7 @@ class WordSenseData(Dataset):
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        return {"average": self.data.loc[idx, "average"],
-                "stdev": self.data.loc[idx, "stdev"],
-                "index": self.data.loc[idx, 'index'],
-                "homonym": self.data.loc[idx, 'homonym'],
-                "context": self.data.loc[idx, 'context'],
-                "judged_meaning": self.data.loc[idx, "judged_meaning"],
-                "example_sentence": self.data.loc[idx, 'example_sentence']}
+        return {key: self.data.loc[idx, key] for key in self.data.columns}
         
 
 def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batch_size=64):
@@ -55,34 +50,35 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     # loss_fn = torch.nn.CrossEntropyLoss()
     loss_fn = torch.nn.KLDivLoss(reduction="batchmean")
     optimizer = torch.optim.AdamW([
-        {'params': model.K.parameters(), 'lr': 0.004, 'weigh_decay': 0.2},
-        {'params': model.Q.parameters(), 'lr': 0.004, 'weigh_decay': 0.2},
-        {'params': model.V.parameters(), 'lr': 0.004, 'weigh_decay': 0.2},
-        {'params': model.scorer.parameters(), 'lr': 0.01, 'weigh_decay': 0.01}
+        {'params': model.K.parameters(), 'lr': 1e-5, 'weigh_decay': 0.2},
+        {'params': model.Q.parameters(), 'lr': 1e-5, 'weigh_decay': 0.2},
+        {'params': model.V.parameters(), 'lr': 1e-5, 'weigh_decay': 0.2},
+        {'params': model.scorer.parameters(), 'lr': 1e-4, 'weigh_decay': 0.01}
         ],
         betas=(0.7, 0.999))
     
     best_vloss = 1_000_000.
-    for epoch in tqdm(range(n_epochs)):
+    for epoch in tqdm(range(n_epochs),desc="Epochs:", position = 0):
+        print("EPOCH:", epoch)
         if epoch==0:
             for layer in [model.scorer]:
                 for param in layer.parameters():
                     param.requires_grad = False
-        elif epoch==30:
+        elif epoch==4:
             for layer in [model.K, model.Q, model.V]:
                 for param in layer.parameters():
                     param.requires_grad = False
             for layer in [model.scorer]:
                 for param in layer.parameters():
                     param.requires_grad = True    
-        elif epoch==60:
+        elif epoch==10:
             for layer in [model.K, model.Q, model.V]:
                 for param in layer.parameters():
                     param.requires_grad = True
         running_tacc = 0
         running_loss = 0.0
         model.train()
-        for batch in train_loader:
+        for batch in tqdm(train_loader, desc="Training Batch:", leave = False):
             y_batch = torch.Tensor(batch["average"])-1
             y_stdev = torch.Tensor(batch["stdev"])
             y_stdev = y_stdev.masked_fill(y_stdev==0,1e-20)
@@ -112,7 +108,7 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         # Disable gradient computation and reduce memory consumption.
         running_vacc = 0
         with torch.no_grad():
-            for v_data in dev_loader:
+            for v_data in tqdm(dev_loader, desc="Dev Batch:", leave = False):
                 v_batch = torch.Tensor(v_data["average"])-1
                 v_stdev = torch.Tensor(v_data["stdev"])
                 v_stdev = v_stdev.masked_fill(v_stdev==0,1e-20)
@@ -136,11 +132,22 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
             best_vloss = avg_vloss
-            model_path = 'checkpoint/{}_{}_{}.safetensors'.format(
+            name = "{}_{}_{}".format(
                                         base_model.split("/")[-1],
                                         timestamp,
                                         epoch)
-            save_model(model, model_path)
+            model_path = 'checkpoint/{}/{}.safetensors'.format(name,name)
+            save_model(model, name, model_path)
+            plot_linear_weights(
+                [model.K.weight, model.Q.weight, model.V.weight],
+                ["K", "Q", "V"],
+                running_tacc/len(train_set),
+                running_vacc/len(dev_set),
+                avg_loss,
+                avg_vloss,
+                "checkpoint/{}/{}.png".format(name,name)
+                )
+                
             
     return model_path
 
@@ -150,15 +157,45 @@ def run(model, data: pd.DataFrame):
     res = pd.DataFrame(columns = ["id", "prediction"])
     with torch.no_grad():
         for batch in loader:
-            pred = torch.argmax(model(batch), dim=2)+1
+            pred = torch.argmax(model(batch), dim=1)+1
             y = pd.DataFrame(pred.cpu(), columns=['prediction'])
             y['id'] = batch['index']
             res = pd.concat([res, y])
     res["id"] = res["id"].astype("str")
     res["prediction"] = res["prediction"].astype("int")
     return res
+
+def plot_linear_weights(weights_list, layer_names, train_acc, dev_acc, train_loss, dev_loss, save_path='weights_visualization.png', figsize=(18, 5)):
+    
+    fig, axes = plt.subplots(1, len(weights_list), figsize=figsize)
+    
+    # Plot each weight matrix
+    for weights, name, ax in zip(weights_list, layer_names, axes):
+        weights = weights.detach().cpu().numpy()
         
-def save_model(model, model_path="model.safetensors"):
+        im = ax.matshow(weights, cmap='coolwarm', aspect='auto', vmin=-np.abs(weights).max(), vmax=np.abs(weights).max())
+        ax.set_title(f'{name}\nShape: {weights.shape}', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Input Features')
+        ax.set_ylabel('Output Features')
+        
+        # Add colorbar
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    
+    # Create metrics caption
+    caption = (
+        f'Training: Acc = {train_acc:.4f}, Loss = {train_loss:.4f} | '
+        f'Dev: Acc = {dev_acc:.4f}, Loss = {dev_loss:.4f}')
+    
+    # Add caption below the plots
+    fig.text(0.5, 0.02, caption, ha='center', fontsize=11, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    
+    plt.tight_layout(rect=[0, 0.05, 1, 1])  # Leave space for caption
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Figure saved to {save_path}")
+    plt.close()
+        
+def save_model(model, name = "model", model_path="model.safetensors"):
+    os.makedirs("checkpoint/{}".format(name), exist_ok = True)
     state_dict = model.state_dict()
     save_file(state_dict, model_path)
 
