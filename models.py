@@ -18,7 +18,12 @@ else:
 ########## Submodules
 
 class ScoreModule(torch.nn.Module):
+    """Scores input signal on a scale of 5 
 
+    Args:
+        input_len (int): input features
+        hidden_sizes (List[int]): list of hidden layer sizes
+    """
     def __init__(self, input_len = 1, hidden_sizes=[]):
         super().__init__()
         if hidden_sizes:
@@ -54,6 +59,13 @@ class RefineModule(torch.nn.Module):
         return self.layers(x)
     
 class ContextEmbedModule(torch.nn.Module):
+    """Generates embedding (and offsets) using a given Bert-like model.
+    Handles all embedding related tasks.
+
+    Args:
+        model_name (str): name of a Bert-like model to use (e.g. "google-bert/bert-base-cased")
+        max_length (int): max context length of the model used in padding or truncation.
+    """
     def __init__(self,
                 model_name = "google-bert/bert-base-cased",
                 max_length = 512):
@@ -103,6 +115,9 @@ class ContextEmbedModule(torch.nn.Module):
             return embeds
 
 class ContextOffsetModule(torch.nn.Module):
+    """Redundant consolidation of ContextEmbedModule
+    TODO: refactor s.t. all instances of this module uses ContextEmbedModule
+    """
     # separate from BERT module to test this with different models (e.g. LLMs)
     def __init__(self, model_name = "google-bert/bert-base-cased"):
         super().__init__()
@@ -121,7 +136,12 @@ class ContextOffsetModule(torch.nn.Module):
         return res_tensors
 
 class SentenceEmbedModule(torch.nn.Module):
-    def __init__(self, model_name='all-MiniLM-L6-v2'):
+    """Embeds a sentence using SentenceTransformers
+
+    Args:
+        model_name (str): name of SBert-like model (e.g. sentencetransformers/all-MiniLM-L6-v2')
+    """
+    def __init__(self, model_name='sentencetransformers/all-MiniLM-L6-v2'):
         super().__init__()
         self.sbert_model = SentenceTransformer(model_name, device=device)
     
@@ -132,10 +152,14 @@ class SentenceEmbedModule(torch.nn.Module):
 
 ########### Main Modules
 class Sentence_SimModule(torch.nn.Module):
-    # similarity module using SentenceTransformers for entire sentence embedding
-    # instead of just target word
+    """Similarity module using SentenceTransformers for entire sentence embedding instead of just target word
+
+    Args:
+        device (str): 'cpu', 'mps', or 'cuda'
+        model_name (str): Sbert-like model name 
+    """
     
-    def __init__(self, device, model_name='all-MiniLM-L6-v2'):
+    def __init__(self, device, model_name='sentencetransformers/all-MiniLM-L6-v2'):
         super().__init__()
         self.device = device
         self.sbert_model = SentenceTransformer(model_name, device=self.device)
@@ -149,9 +173,12 @@ class Sentence_SimModule(torch.nn.Module):
         sim = self.sbert_model.similarity_pairwise(context_embeds, example_embeds).to(self.device)
         return sim
 
-
 class SimilarityScoreModule(torch.nn.Module):
-
+    """Connects similarity module with a score component
+    Args:
+        model_name (str): Bert/Sbert-like model name 
+        use_sbert (bool): whether to use Sentence_SimModule for embeddings
+    """
     def __init__(self,
                 model_name = "google-bert/bert-base-cased",
                 use_sbert:bool = False):
@@ -179,10 +206,15 @@ class SimilarityScoreModule(torch.nn.Module):
         return y.transpose(1, 2).squeeze(-1)
     
 class CrossContentSimilarityModule(torch.nn.Module):
+    """Compares a sentence embedding of the candidate sentence with all contextual embeddings of the context excerpt.
+
+    Args:
+        model_name (str): Sbert-like model name
+        max_length (int): max context length for the model
+    """
     def __init__(self,
                 model_name = "sentence-transformers/all-MiniLM-L6-v2",
-                max_length = 512,
-                train = False):
+                max_length = 512):
         super().__init__()
         self.max_length = max_length
         self.context_former = ContextEmbedModule(model_name = model_name, max_length = max_length)
@@ -207,6 +239,12 @@ class CrossContentSimilarityModule(torch.nn.Module):
         return y
         
 class GeneralistModel(torch.nn.Module):
+    """GLiNER inspired designed module
+
+    Args:
+        model_name (str): Bert-like model name
+        max_length (int): max context length for the model
+    """
     def __init__(self,
             model_name = "google-bert/bert-base-cased",
             max_length = 512):
