@@ -74,14 +74,14 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
             for layer in [model.scorer]:
                 for param in layer.parameters():
                     param.requires_grad = False
-        elif epoch==4:
+        elif epoch==30:
             for layer in [model.K, model.Q, model.V]:
                 for param in layer.parameters():
                     param.requires_grad = False
             for layer in [model.scorer]:
                 for param in layer.parameters():
                     param.requires_grad = True    
-        elif epoch==10:
+        elif epoch==60:
             for layer in [model.K, model.Q, model.V]:
                 for param in layer.parameters():
                     param.requires_grad = True
@@ -164,15 +164,16 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                         "acc": dev_acc_record}}
             
             save_model(model, metrics, model_dir, model_name)
-            plot_linear_weights(
-                [model.K.weight, model.Q.weight, model.V.weight],
-                ["K", "Q", "V"],
-                running_tacc/len(train_set),
-                running_vacc/len(dev_set),
-                avg_loss,
-                avg_vloss,
-                os.path.join(model_dir,"{}.png".format(model_name,model_name))
-                )
+            if epoch<30 or epoch>=60:
+                plot_linear_weights(
+                    [model.K.weight, model.Q.weight, model.V.weight],
+                    ["K", "Q", "V"],
+                    running_tacc/len(train_set),
+                    running_vacc/len(dev_set),
+                    avg_loss,
+                    avg_vloss,
+                    "checkpoint/{}/{}_qkv.png".format(model_name,model_name)
+                    )
             
     return model_path
 
