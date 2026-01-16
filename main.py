@@ -64,11 +64,18 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
     
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs)):
-        if epoch<=10:
+        if epoch==0:
+            for layer in [model.scorer]:
+                for param in layer.parameters():
+                    param.requires_grad = False
+        elif epoch==30:
             for layer in [model.K, model.Q, model.V]:
                 for param in layer.parameters():
                     param.requires_grad = False
-        else:
+            for layer in [model.scorer]:
+                for param in layer.parameters():
+                    param.requires_grad = True    
+        elif epoch==60:
             for layer in [model.K, model.Q, model.V]:
                 for param in layer.parameters():
                     param.requires_grad = True
