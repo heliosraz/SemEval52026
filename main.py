@@ -129,17 +129,18 @@ def train(model, train_set: Dataset, dev_set: Dataset, n_epochs: int = 100, batc
                 v_inputs = v_data
                 v_outputs = model(v_inputs)
                 v_loss = loss_fn(v_outputs, v_probs)
+                running_vloss += v_loss.item()
                 running_vacc += sum([b-std<=a<=b+std for a, b, std in zip(
                     torch.argmax(v_outputs, dim = 1).flatten().float().tolist(),
                     v_batch.flatten().float().tolist(),
                     v_stdev.float().tolist())])
-                running_vloss += v_loss
+ 
 
         avg_vloss = running_vloss/len(dev_loader)
         print('LOSS train {} dev {}'.format(avg_loss, avg_vloss))
         print('ACCURACY train {} dev {}'.format(running_tacc/len(train_set), running_vacc/len(dev_set)))
         
-        train_loss_record.appendavg_loss()
+        train_loss_record.append(avg_loss)
         train_acc_record.append(running_tacc/len(train_set))
         dev_loss_record.append(avg_vloss)
         dev_acc_record.append(running_vacc/len(dev_set))
