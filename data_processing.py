@@ -1,8 +1,20 @@
 import pandas as pd
 import os
 import itertools
-#from pathlib import Path
-#from datasets import Dataset, DatasetDict
+from datasets import Dataset, DatasetDict
+
+# += sum([b-std<=a<=b+std for a, b, std in zip(
+#                             torch.argmax(
+#                                 y_pred,
+#                                 dim = 1).flatten().float().tolist(),
+#                             y_batch.flatten().float().tolist(),
+#                             y_stdev.float().tolist())])
+            
+#             y_batch = torch.Tensor(batch["average"])-1
+#             y_stdev = torch.Tensor(batch["stdev"])
+#             y_stdev = y_stdev.masked_fill(y_stdev==0,1e-20)
+            # y_probs = torch.exp(-0.5*((torch.arange(5).unsqueeze(0)-y_batch.unsqueeze(1))/y_stdev.unsqueeze(1))**2).float().to(device)
+            # y_probs = y_probs / (y_probs.sum(dim=1, keepdim=True) + 1e-8)
 
 def load_data(path):
     data = pd.read_json(path).transpose()
@@ -37,7 +49,7 @@ def augment_data(path):
         orient="index",
         indent = 4)
     
-def pretrain_aug(path):
+def mask_data(path):
     data = load_data(path)
     aug_data = {"target": [], "source": [], "mask": []}
     for _, row in data.iterrows():

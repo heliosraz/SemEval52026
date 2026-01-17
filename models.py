@@ -17,23 +17,23 @@ else:
 
 ########## Submodules
 
-class ScoreModule(torch.nn.Module):
+class ClassifierModule(torch.nn.Module):
     """Scores input signal on a scale of 5 
 
     Args:
         input_len (int): input features
         hidden_sizes (List[int]): list of hidden layer sizes
     """
-    def __init__(self, input_len = 1, hidden_sizes=[]):
+    def __init__(self, input_len = 1, output_len = 5, hidden_sizes=[]):
         super().__init__()
         if hidden_sizes:
             layers = [torch.nn.Linear(input_len, hidden_sizes[0])]
             for h_i, h_j in zip(hidden_sizes, hidden_sizes[1:]):
                 layers.append(torch.nn.Linear(h_i, h_j))
-            layers.append(torch.nn.Linear(hidden_sizes[-1], 5))
+            layers.append(torch.nn.Linear(hidden_sizes[-1], output_len))
             self.layers = torch.nn.ModuleList(layers)
         else:
-            self.layers = torch.nn.ModuleList([torch.nn.Linear(input_len, 5)])
+            self.layers = torch.nn.ModuleList([torch.nn.Linear(input_len, output_len)])
             
     def forward(self, x, drop_p=0.3, train = False):
         for layer in self.layers[:-1]:
@@ -193,7 +193,7 @@ class SimilarityScoreModule(torch.nn.Module):
             self.sim = torch.nn.CosineSimilarity()
             for param in self.offset.parameters():
                 param.requires_grad = False
-        self.scorer = ScoreModule(hidden_sizes = [128])
+        self.scorer = ClassifierModule(hidden_sizes = [128])
 
     def forward(self, data, select = ["context", "example_sentence"]):
         if self.use_sbert:
@@ -225,7 +225,7 @@ class CrossContentSimilarityModule(torch.nn.Module):
                 param.requires_grad = False
                 
         self.sim = torch.nn.CosineSimilarity(dim = 2)
-        self.scorer = ScoreModule(input_len = max_length, hidden_sizes = [128])
+        self.scorer = ClassifierModule(input_len = max_length, hidden_sizes = [128])
     def forward(self, data:Dict, select = ["context", "judged_meaning"]):
         # context gets fed into bert to get contextual embeddings
         content_embed = self.context_former(data[select[0]])
@@ -237,7 +237,6 @@ class CrossContentSimilarityModule(torch.nn.Module):
         # feed similarities into scorer
         y = self.scorer(similarities)
         return y
-        
 class GeneralistModel(torch.nn.Module):
     """GLiNER inspired designed module
 
@@ -247,7 +246,8 @@ class GeneralistModel(torch.nn.Module):
     """
     def __init__(self,
             model_name = "google-bert/bert-base-cased",
-            max_length = 512):
+            max_length = 512,
+            d_attn = 128):
         super().__init__()
         self.model = ContextEmbedModule(model_name = model_name,
                                         max_length = max_length)
@@ -255,8 +255,6 @@ class GeneralistModel(torch.nn.Module):
             param.requires_grad = False
         self.max_length = max_length
         n = self.model.get_embedding_size()
-        d_attn = 128
-        self.scorer = ScoreModule(input_len = d_attn, hidden_sizes = [])
         self.K = torch.nn.Linear(n, d_attn, bias=False)
         self.Q = torch.nn.Linear(n, d_attn, bias=False)
         self.V = torch.nn.Linear(n, d_attn, bias=False)
@@ -264,6 +262,9 @@ class GeneralistModel(torch.nn.Module):
         torch.nn.init.xavier_normal_(self.Q.weight) 
         torch.nn.init.xavier_normal_(self.V.weight) 
         self.dropout = torch.nn.Dropout(0.3)
+        
+    def get_vocab_size(self):
+        return self.model.tokenizer.vocab_size
         
     def scaled_dot_product_attention(
                         self,
@@ -369,11 +370,44 @@ class GeneralistModel(torch.nn.Module):
             train = train
             )
         
-        # x = self.dropout(x)
-        x_pooled = x.mean(dim=1)
-        y = self.scorer(x_pooled, train=train)
-        y = torch.nn.functional.log_softmax(y, dim=1)
+        return x
+    
+class GeneralistModelScored(torch.nn.Module):
+    def __init__(self,
+            model_name = "google-bert/bert-base-cased",
+            max_length = 512,
+            d_attn = 128):
+        super().__init__()
+        self.base_model = GeneralistModel(model_name, max_length, d_attn)
+        self.classifier = ClassifierModule(input_len = d_attn, hidden_sizes = [])
+        
+    def forward(self, data, select = ["context", "judged_meaning"], train = False):
+        x = self.base_model(data, train, select)
+        y = self.classifier(x)
         return y
+    
+class PretrainedGeneralistModel(torch.nn.Module):
+    def __init__(
+        self,
+        base = GeneralistModel,
+        model_name = "google-bert/bert-base-cased",
+        max_length = 512,
+        d_attn = 128):
+        super().__init__()
+        self.base_model = base(model_name, max_length, d_attn)
+        vocab_size = self.base_model.get_vocab_size()
+        self.classifier = ClassifierModule(
+            input_len = d_attn,
+            output_len = vocab_size)
+        for param in self.classifier.parameters():
+            param.requires_grad = False
+        
+    def forward(self, data, target = "masked", train = True):
+        x = self.base_model(data, train) # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]
+        x = x[torch.arange(x.shape[0]),data[target],:] # [batch, q_seq, d_attn] -> [16, 1, d_attn]
+        y = self.classifier(x) # [16, 1, d_attn] -> [16, class_out]
+        return y
+        
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
 class NoSimSentenceModule(torch.nn.Module):
