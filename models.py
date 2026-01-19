@@ -6,6 +6,7 @@ from bisect import bisect
 from typing import List, Dict
 import sys
 import math
+from random import randint
 
 
 if torch.cuda.is_available():
@@ -64,7 +65,7 @@ class ContextEmbedModule(torch.nn.Module):
 
     Args:
         model_name (str): name of a Bert-like model to use (e.g. "google-bert/bert-base-cased")
-        max_length (int): max context length of the model used in padding or truncation.
+        max_length (int): max full_context length of the model used in padding or truncation.
     """
     def __init__(self,
                 model_name = "google-bert/bert-base-cased",
@@ -94,25 +95,45 @@ class ContextEmbedModule(torch.nn.Module):
                 res.append(word_off_ind-1)
         return torch.Tensor(res).long()
     
-    def forward(self, data, include_offsets = False, tokenize = True):
+    def mask(self, data, tokens):
+        # find how long each sequence is
+        instances = self.tokenizer(data,
+                    padding = False).to(device)
+        print([len(toks) for toks in instances], max([len(toks) for toks in instances]))
+        # generate a random masked index (-1 being no mask)
+        mask_res = {"mask_ids": [], "mask_inds": [randint(-1, len(toks)-1) for toks in instances["input_ids"]]}
+        # for each masking index generate a pseudo-mask
+        # or gather the true token id and mask
+        for i, replace_ind in enumerate(mask_res["mask_inds"]):
+            if replace_ind<0:
+                replace_ind = randint(0, len(instances["input_ids"][i])-1)
+                mask_res["mask_inds"][i] = replace_ind
+                true_token = instances["input_ids"][i][replace_ind]
+            else:
+                true_token = instances["input_ids"][i][replace_ind]
+                tokens["input_ids"][i][replace_ind] = self.tokenizer.mask_token_id
+            mask_res["mask_ids"].append(true_token)
+        return tokens, mask_res
+    
+    def forward(self, data, offset = False, tokenize = True):
         if tokenize:
             tokens = self.tokenizer(data,
                                     return_tensors='pt',
                                     padding = "max_length",
                                     max_length = self.max_length,
-                                    return_offsets_mapping=include_offsets).to(device)
+                                    return_offsets_mapping=offset).to(device)
         else:
             tokens = data
-        if include_offsets:
+        if offset:
             offsets = tokens.pop("offset_mapping")
-        else:
-            offsets = torch.Tensor()
+                
         embeds = self.model(**tokens)
         embeds = embeds.last_hidden_state
-        if include_offsets:
+        if offset:
             return embeds, offsets
         else:
             return embeds
+            
 
 class ContextOffsetModule(torch.nn.Module):
     """Redundant consolidation of ContextEmbedModule
@@ -123,14 +144,14 @@ class ContextOffsetModule(torch.nn.Module):
         super().__init__()
         self.embed = ContextEmbedModule(model_name)
 
-    def forward(self, data: Dict, select = ['context', 'example_sentence']):
+    def forward(self, data: Dict, select = ['full_context', 'example_sentence']):
         # taken from benchmark_bert.py
         offsets = {}
         outputs = {}
         res_tensors = {}
         for param in select:
             outputs[param], batch_offsets = self.embed(list(data[param]), include_offsets = True)
-            # get list of target offsets for each data instance for both context and example
+            # get list of target offsets for each data instance for both full_context and example
             offsets[param] = self.embed.get_offsets(data, param, batch_offsets)
             res_tensors[param] = outputs[param][torch.arange(0, outputs[param].shape[0]), offsets[param], :]
         return res_tensors
@@ -165,11 +186,11 @@ class Sentence_SimModule(torch.nn.Module):
         self.sbert_model = SentenceTransformer(model_name, device=self.device)
 
     def forward(self,data:Dict):
-        context_embeds = self.sbert_model.encode(list(data['context']),
+        context_embeds = self.sbert_model.encode(list(data['full_context']),
                                                 convert_to_tensor=True).to(self.device)
         example_embeds = self.sbert_model.encode(list(data['example_sentence']),
                                                 convert_to_tensor=True).to(self.device)
-        # 'similarity_pairwise' bc otherwise it's every context with every example
+        # 'similarity_pairwise' bc otherwise it's every full_context with every example
         sim = self.sbert_model.similarity_pairwise(context_embeds, example_embeds).to(self.device)
         return sim
 
@@ -195,7 +216,7 @@ class SimilarityScoreModule(torch.nn.Module):
                 param.requires_grad = False
         self.scorer = ClassifierModule(hidden_sizes = [128])
 
-    def forward(self, data, select = ["context", "example_sentence"]):
+    def forward(self, data, select = ["full_context", "example_sentence"]):
         if self.use_sbert:
             x = self.sim(data)
         else:
@@ -206,11 +227,11 @@ class SimilarityScoreModule(torch.nn.Module):
         return y.transpose(1, 2).squeeze(-1)
     
 class CrossContentSimilarityModule(torch.nn.Module):
-    """Compares a sentence embedding of the candidate sentence with all contextual embeddings of the context excerpt.
+    """Compares a sentence embedding of the candidate sentence with all contextual embeddings of the full_context excerpt.
 
     Args:
         model_name (str): Sbert-like model name
-        max_length (int): max context length for the model
+        max_length (int): max full_context length for the model
     """
     def __init__(self,
                 model_name = "sentence-transformers/all-MiniLM-L6-v2",
@@ -226,8 +247,8 @@ class CrossContentSimilarityModule(torch.nn.Module):
                 
         self.sim = torch.nn.CosineSimilarity(dim = 2)
         self.scorer = ClassifierModule(input_len = max_length, hidden_sizes = [128])
-    def forward(self, data:Dict, select = ["context", "judged_meaning"]):
-        # context gets fed into bert to get contextual embeddings
+    def forward(self, data:Dict, select = ["full_context", "judged_meaning"]):
+        # full_context gets fed into bert to get contextual embeddings
         content_embed = self.context_former(data[select[0]])
         # example_sentence/definition fed into sbert to get pooled contextual embeddings
         candidate_embed = self.sentence_former(data[select[1]]).unsqueeze(-1)
@@ -242,7 +263,7 @@ class GeneralistModel(torch.nn.Module):
 
     Args:
         model_name (str): Bert-like model name
-        max_length (int): max context length for the model
+        max_length (int): max full_context length for the model
     """
     def __init__(self,
             model_name = "google-bert/bert-base-cased",
@@ -302,8 +323,7 @@ class GeneralistModel(torch.nn.Module):
         attn_weight = torch.dropout(attn_weight, dropout_p, train=train)
         return attn_weight @ value
         
-        
-    def forward(self, data:Dict, train = False, select = ["context", "judged_meaning"]):
+    def forward(self, data:Dict, select = ["full_context", "judged_meaning"], mask = False, train = False,):
         data["sep"] = [self.model.tokenizer.sep_token]*len(data[select[0]])
         sep_toks = self.model.tokenizer(
                                 data["sep"],
@@ -314,7 +334,9 @@ class GeneralistModel(torch.nn.Module):
                                 data[select[1]],
                                 return_tensors = "pt",
                                 padding = "max_length",
-                                max_length = self.max_length//2-sep_size).to(device)
+                                max_length = self.max_length//2-sep_size,).to(device)
+        if mask:
+            candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
         context_toks = self.model.tokenizer(
                                 data[select[0]],
                                 return_tensors = "pt",
@@ -336,7 +358,6 @@ class GeneralistModel(torch.nn.Module):
         # separate by [SEP] and feed each into refiner
         input_embeds = self.model(
                                 input_seq,
-                                include_offsets = False,
                                 tokenize = False)
         sep_inds = [(len(candi), len(candi)+len(sep)) 
                     for candi, sep in zip(
@@ -370,7 +391,7 @@ class GeneralistModel(torch.nn.Module):
             train = train
             )
         
-        return x
+        return x, masks
     
 class GeneralistModelScored(torch.nn.Module):
     def __init__(self,
@@ -381,10 +402,11 @@ class GeneralistModelScored(torch.nn.Module):
         self.base_model = GeneralistModel(model_name, max_length, d_attn)
         self.classifier = ClassifierModule(input_len = d_attn, hidden_sizes = [])
         
-    def forward(self, data, select = ["context", "judged_meaning"], train = False):
-        x = self.base_model(data, train, select)
+    def forward(self, data, select = ["full_context", "judged_meaning"], mask = False, train = False):
+        x, mask_res = self.base_model(data, select, mask=mask, train=train)
+        x = x.max(dim = 1)[0]
         y = self.classifier(x)
-        return y
+        return y, mask_res
     
 class PretrainedGeneralistModel(torch.nn.Module):
     def __init__(
@@ -402,11 +424,15 @@ class PretrainedGeneralistModel(torch.nn.Module):
         for param in self.classifier.parameters():
             param.requires_grad = False
         
-    def forward(self, data, target = "masked", train = True):
-        x = self.base_model(data, train) # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]
-        x = x[torch.arange(x.shape[0]),data[target],:] # [batch, q_seq, d_attn] -> [16, 1, d_attn]
+    def forward(self, data, select = ["full_context", "candidate"], mask = True, train = True):
+        x, mask_res = self.base_model(data, mask = mask, select = select, train=train) # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]
+        if mask:
+            mask_inds = mask_res["mask_inds"]
+            x = x[torch.arange(x.shape[0]), mask_inds, :] # [batch, q_seq, d_attn] -> [16, 1, d_attn]
+        else:
+            x = x.max(dim = 1)[0].unsqueeze(1)
         y = self.classifier(x) # [16, 1, d_attn] -> [16, class_out]
-        return y
+        return y, mask_res
         
 
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
@@ -418,7 +444,7 @@ class NoSimSentenceModule(torch.nn.Module):
         self.sbert_model = SentenceTransformer(model_name, device=self.device)
 
     def forward(self,data:Dict):
-        context_embeds = self.sbert_model.encode(list(data['context']), convert_to_tensor=True).to(self.device)
+        context_embeds = self.sbert_model.encode(list(data['full_context']), convert_to_tensor=True).to(self.device)
         example_embeds = self.sbert_model.encode(list(data['example_sentence']), convert_to_tensor=True).to(self.device)
         return context_embeds, example_embeds
 

@@ -2,7 +2,7 @@ from data_processing import load_data
 import torch
 from tqdm import tqdm
 from sys import argv, exit
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
@@ -24,13 +24,7 @@ class WordSenseData(Dataset):
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        return {"average": self.data.loc[idx, "average"],
-                "stdev": self.data.loc[idx, "stdev"],
-                "index": self.data.loc[idx, 'index'],
-                "homonym": self.data.loc[idx, 'homonym'],
-                "context": self.data.loc[idx, 'context'],
-                "judged_meaning": self.data.loc[idx, "judged_meaning"],
-                "example_sentence": self.data.loc[idx, 'example_sentence']}
+        return {col: self.data.loc[idx, col] for col in self.data.columns.tolist()}
 
 class MaskedData(Dataset):
     def __init__(self, data: pd.DataFrame):
@@ -40,7 +34,7 @@ class MaskedData(Dataset):
     def __getitem__(self, idx):
         return {"masked": self.data.loc[idx, "masked"],
                 "candidate": self.data.loc[idx, 'candidate'],
-                "context": self.data.loc[idx, 'context']}
+                "full_context": self.data.loc[idx, 'full_context']}
 
 class CrossAttentionData(Dataset):
     def __init__(self, data: pd.DataFrame):
@@ -51,7 +45,7 @@ class CrossAttentionData(Dataset):
         return {"average": self.data.loc[idx, "average"],
                 "stdev": self.data.loc[idx, "stdev"],
                 "candidate": self.data.loc[idx, 'candidate'],
-                "context": self.data.loc[idx, "context"]}
+                "full_context": self.data.loc[idx, "full_context"]}
 
 os.makedirs("checkpoint", exist_ok = True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
@@ -70,19 +64,25 @@ def train(
         dev_set: Dataset,
         loss_fn: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
-        input_tags: str|List[str] = ["context", "judged_meaning"],
+        softmax_pred: bool,
+        input_tags: str|List[str] = ["full_context", "judged_meaning"],
         label_tag: str = "label",
+        metric_label: str = "label",
+        metric = None,
         n_epochs: int = 100,
         batch_size=64,
         freeze_schedule: Dict[int,(Tuple[List[torch.Tensor]]|Any)] = {},
-        save_weights: bool = True,
-        metric = None):
+        save_weights_plots: bool = True,
+
+        mask: bool = False):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
+    train_set = Subset(train_set, range(200))
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
                         shuffle=True,)
+    dev_set = Subset(train_set, range(10))
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
     
@@ -106,15 +106,27 @@ def train(
         running_loss = 0.0
         model.train()
         for batch in tqdm(train_loader, desc="Training Batch:", leave = False):
-            y_labels = torch.Tensor(batch[label_tag])
+            # mask needs to tokenize to know sep_len -> outputs input_ids (w/ mask)
+                # returning text with mask, risks the seq_len changing
+                # masking changes the task s.t. the y_labels change
+            # model deals with tokenizing, so:
+                # 1. move masking to model,  returns y_pred and y_labels
+                # 2. create a tag to disable model tokenizing
             X_batch = batch
             optimizer.zero_grad()
-            y_pred = model(X_batch, train = True, select = input_tags)
-            loss = loss_fn(y_pred, y_labels)
+            y_pred, mask_keys = model(X_batch, select = input_tags, mask = mask, train = True)
+            batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
+            y_labels = torch.stack(batch[label_tag], dim = 1).float() if type(batch[label_tag])==list else batch[label_tag]
+            if softmax_pred:
+                y_pred = torch.softmax(y_pred, dim = 1)
+            loss = loss_fn(y_pred, y_labels.to(device))
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-            running_tacc += metric(y_pred, y_labels) # accuracy
+            print(loss.item())
+            y_metric = torch.stack(batch[metric_label], dim = 1).float() \
+                if type(batch[metric_label])==list else batch[metric_label]
+            running_tacc += metric(torch.argmax(y_pred, dim = 1), y_metric.to(device)).item() # accuracy
             
         avg_loss = running_loss/len(train_loader)
         running_vloss = 0.0
@@ -124,13 +136,15 @@ def train(
         running_vacc = 0
         with torch.no_grad():
             for v_batch in tqdm(dev_loader, desc="Dev Batch:", leave = False):
-                v_labels = torch.Tensor(v_batch[label_tag])
-                optimizer.zero_grad()
-                v_pred = model(v_batch, train = True, select = input_tags)
-                v_loss = loss_fn(v_pred, v_labels)
+                v_pred, mask_keys = model(X_batch, select = input_tags, mask = mask, train = True)
+                v_batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
+                v_labels = torch.stack(v_batch[label_tag], dim = 1).float() if type(v_batch[label_tag])==list else v_batch[label_tag]
+                v_loss = loss_fn(v_pred, v_labels.to(device))
                 
                 running_vloss += v_loss.item()
-                running_vacc += metric(v_pred, v_labels) # acc
+                v_metric = torch.stack(v_batch[metric_label], dim = 1).float() \
+                    if type(v_batch[metric_label])==list else v_batch[metric_label]
+                running_vacc += metric(torch.argmax(v_pred, dim = 1), v_metric.to(device)).item() # acc
 
         avg_vloss = running_vloss/len(dev_loader)
         print('LOSS train {} dev {}'.format(avg_loss, avg_vloss))
@@ -160,11 +174,11 @@ def train(
                         "loss": dev_loss_record,
                         "acc": dev_acc_record}}
             
-            save_model(model, metrics, model_dir, model_name)
-            if save_weights:
+            state_dict = save_model(model, metrics, model_dir, model_name)
+            if save_weights_plots:
                 plot_linear_weights(
-                    [param.data for name, param in model.named_parameters() if "weight" in name or "bias" in name],
-                    [name for name, _ in model.named_parameters()],
+                    [param.data for name, param in state_dict.items()],
+                    [name for name, _ in state_dict.items()],
                     running_tacc/len(train_set),
                     running_vacc/len(dev_set),
                     avg_loss,
@@ -224,14 +238,17 @@ def save_model(
                 model_name = "model"):
     model_fpath = os.path.join(model_dir,'{}.safetensors'.format(model_name,model_name))
     model_mpath = os.path.join(model_dir,'{}_metrics.json'.format(model_name,model_name))
-    state_dict = model.state_dict()
+    state_dict = {
+        name: param 
+        for name, param in model.named_parameters() 
+        if param.requires_grad
+    }
     save_file(state_dict, model_fpath)
     with open(model_mpath, "w") as f:
         json.dump(metrics, f, indent = 4)
+    return state_dict
 
 if __name__ == "__main__":
-    def accuracy_count(labels, preds):
-        return sum([mn<=label<=mx for label, (mn, mx) in zip(labels, preds)])
     ## Data Processing
     if len(argv)<3:
         print("No data files were provided.")
@@ -248,33 +265,55 @@ if __name__ == "__main__":
     train_set = task_dataset[task](train_df)
     dev_set = task_dataset[task](dev_df)
 
-    ## Training config
+    ## Training parameters
     if base_model:
-        model = models.GeneralistModelScored(base_model).to(device)
+        model = models.PretrainedGeneralistModel(base_model).to(device)
     else:
-        model = models.GeneralistModelScored().to(device)
-    metric = accuracy_count
-    loss_fn = torch.nn.KLDivLoss(reduction="batchmean")
+        model = models.PretrainedGeneralistModel().to(device)
+    input_tags = ["source", "target"]
+    label_tag = "mask"
+    metric_label = "mask"
+    def accuracy(preds, labels):
+        return sum([pred==l for pred, l in zip(preds, labels)])
+        # return sum([])
+    metric = accuracy
+    loss_fn = torch.nn.CrossEntropyLoss()
+    softmax_pred = False
     optim = torch.optim.AdamW([
-        {'params': model.base_model.parameters(), 'lr': 1e-5, 'weigh_decay': 0.2},
-        {'params': model.classifier.parameters(), 'lr': 1e-4, 'weigh_decay': 0.01}
+        {'params': model.base_model.parameters(), 'lr': 1e-4, 'weigh_decay': 0.2}
         ],
         betas=(0.7, 0.999))
     schedule = {
-        0: ([model.classifier],[]), 
-        30: ([model.base_model],[model.classifier]),
-        60:([],[model.base_model])}
+        0: ([model.classifier],[])}
+    mask = True
+    
+    # Double checking config feasibility
+    if (type(loss_fn), softmax_pred) == (torch.nn.CrossEntropyLoss, True) or \
+        (type(loss_fn), softmax_pred) == (torch.nn.KLDivLoss, False):
+        raise TypeError("Loss function and prediction softmaxing mismatch. \
+                        Please check the training parameters:\n\
+                        type(loss_fun), softmax_pred = {},{}".format(type(loss_fn), softmax_pred))
+    elif (type(loss_fn), label_tag) == (torch.nn.CrossEntropyLoss, "probs") or \
+        (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "mask") or \
+            (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "average"):
+        raise TypeError("Loss function and label tag mismatch. \
+                        Please check the training parameters:\n\
+                        type(loss_fun), label_tag = {},{}".format(type(loss_fn), label_tag))
     
     # Model Training and Eval
     model_path = train(
                     model,
                     train_set,
                     dev_set,
-                    label_tag = "average",
+                    input_tags = input_tags,
+                    label_tag = label_tag,
+                    metric_label = metric_label,
                     loss_fn = loss_fn,
                     optimizer = optim,
                     freeze_schedule = schedule,
                     metric = metric,
+                    mask = mask,
+                    softmax_pred = softmax_pred
                     )
     # model_path = "checkpoint/all-mpnet-base-v2_20260109_010623_49.safetensors"
     load_model(model, model_path)
