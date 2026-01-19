@@ -99,7 +99,7 @@ class ContextEmbedModule(torch.nn.Module):
         # find how long each sequence is
         instances = self.tokenizer(data,
                     padding = False).to(device)
-        print([len(toks) for toks in instances], max([len(toks) for toks in instances]))
+        # print([len(toks) for toks in instances], max([len(toks) for toks in instances]))
         # generate a random masked index (-1 being no mask)
         mask_res = {"mask_ids": [], "mask_inds": [randint(-1, len(toks)-1) for toks in instances["input_ids"]]}
         # for each masking index generate a pseudo-mask
@@ -258,6 +258,113 @@ class CrossContentSimilarityModule(torch.nn.Module):
         # feed similarities into scorer
         y = self.scorer(similarities)
         return y
+    
+class GeneralistModel_nosep(torch.nn.Module):
+    """GLiNER inspired designed module
+
+    Args:
+        model_name (str): Bert-like model name
+        max_length (int): max full_context length for the model
+    """
+    def __init__(self,
+            model_name = "google-bert/bert-base-cased",
+            max_length = 512,
+            d_attn = 128):
+        super().__init__()
+        self.model = ContextEmbedModule(model_name = model_name,
+                                        max_length = max_length)
+        for param in self.model.parameters():
+            param.requires_grad = False
+        self.max_length = max_length
+        n = self.model.get_embedding_size()
+        self.K = torch.nn.Linear(n, d_attn, bias=False)
+        self.Q = torch.nn.Linear(n, d_attn, bias=False)
+        self.V = torch.nn.Linear(n, d_attn, bias=False)
+        torch.nn.init.xavier_normal_(self.K.weight)  
+        torch.nn.init.xavier_normal_(self.Q.weight) 
+        torch.nn.init.xavier_normal_(self.V.weight) 
+        self.dropout = torch.nn.Dropout(0.3)
+        
+    def get_vocab_size(self):
+        return self.model.tokenizer.vocab_size
+        
+    def scaled_dot_product_attention(
+                        self,
+                        query,
+                        key,
+                        value,
+                        attn_mask=None,
+                        dropout_p=0.3,
+                        is_causal=False,
+                        scale=None,
+                        enable_gqa=False,
+                        train = False) -> torch.Tensor:
+        b, L, S = query.size(0), query.size(-2), key.size(-2)
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        attn_bias = torch.zeros(b, L, S, dtype=query.dtype, device=query.device)
+        if is_causal:
+            assert attn_mask is None
+            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-1e9"))
+            else:
+                attn_mask = attn_mask.bool()
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-1e9"))
+
+        if enable_gqa:
+            key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+            value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+
+        attn_weight = query @ key.transpose(-2, -1) * scale_factor
+        attn_weight += attn_bias
+        attn_weight = torch.softmax(attn_weight, dim = -1) 
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=train)
+        return attn_weight @ value
+        
+    def forward(self, data:Dict, select = ["full_context", "judged_meaning"], mask = False, train = False,):
+        candidate_toks = self.model.tokenizer(
+                                data[select[1]],
+                                return_tensors = "pt",
+                                padding = "max_length",
+                                max_length = self.max_length//2).to(device)
+        if mask:
+            candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
+        context_toks = self.model.tokenizer(
+                                data[select[0]],
+                                return_tensors = "pt",
+                                padding = "max_length",
+                                max_length = self.max_length//2).to(device)
+        # separate by [SEP] and feed each into refiner
+        candidate_embeds = self.model(
+                                candidate_toks,
+                                tokenize = False)
+        context_embeds = self.model(
+                                context_toks,
+                                tokenize = False)
+        # feed into refiner
+        refined_context = self.K(context_embeds)
+        refined_candidate = self.Q(candidate_embeds)
+        aggre_value = self.V(context_embeds)
+        attn_mask = torch.bmm(
+                        candidate_toks["attention_mask"].float().unsqueeze(2),
+                        context_toks["attention_mask"].float().unsqueeze(1)
+                        )
+        
+        # scaled dot product with sigmoid
+        x = self.scaled_dot_product_attention(
+            query = refined_candidate,
+            key = refined_context,
+            value = aggre_value,
+            attn_mask = attn_mask,
+            train = train
+            )
+        
+        return x, masks
+    
+    
 class GeneralistModel(torch.nn.Module):
     """GLiNER inspired designed module
 

@@ -24,17 +24,21 @@ class WordSenseData(Dataset):
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        return {col: self.data.loc[idx, col] for col in self.data.columns.tolist()}
-
-class MaskedData(Dataset):
-    def __init__(self, data: pd.DataFrame):
-        self.data = data
+        return {"average": self.data.loc[idx, "average"],
+                "stdev": self.data.loc[idx, "stdev"],
+                "index": self.data.loc[idx, 'index'],
+                "homonym": self.data.loc[idx, 'homonym'],
+                "context": self.data.loc[idx, 'context'],
+                "judged_meaning": self.data.loc[idx, "judged_meaning"],
+                "example_sentence": self.data.loc[idx, 'example_sentence']}
+    
+class AugWordSenseData(Dataset):
+    def __init__(self, df: pd.DataFrame):
+        self.data = df
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        return {"masked": self.data.loc[idx, "masked"],
-                "candidate": self.data.loc[idx, 'candidate'],
-                "full_context": self.data.loc[idx, 'full_context']}
+        return {col: self.data.loc[idx, col] for col in self.data.columns.tolist()}
 
 class CrossAttentionData(Dataset):
     def __init__(self, data: pd.DataFrame):
@@ -49,7 +53,7 @@ class CrossAttentionData(Dataset):
 
 os.makedirs("checkpoint", exist_ok = True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
-task_dataset = {'data': WordSenseData, 'classifier': WordSenseData,'finetuning': CrossAttentionData,'pretraining':MaskedData}
+task_dataset = {'data': WordSenseData, 'classifier': WordSenseData,'finetuning': CrossAttentionData,'pretraining':AugWordSenseData}
 
 if torch.cuda.is_available():
     device = torch.device("cuda") 
@@ -123,7 +127,7 @@ def train(
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-            print(loss.item())
+            # print(loss.item())
             y_metric = torch.stack(batch[metric_label], dim = 1).float() \
                 if type(batch[metric_label])==list else batch[metric_label]
             running_tacc += metric(torch.argmax(y_pred, dim = 1), y_metric.to(device)).item() # accuracy
@@ -267,9 +271,13 @@ if __name__ == "__main__":
 
     ## Training parameters
     if base_model:
-        model = models.PretrainedGeneralistModel(base_model).to(device)
+        model = models.PretrainedGeneralistModel(
+            base=models.GeneralistModel_nosep,
+            model_name=base_model).to(device)
     else:
-        model = models.PretrainedGeneralistModel().to(device)
+        model = models.PretrainedGeneralistModel(
+            base=models.GeneralistModel_nosep,
+            model_name="FacebookAI/roberta-base").to(device)
     input_tags = ["source", "target"]
     label_tag = "mask"
     metric_label = "mask"
@@ -280,7 +288,7 @@ if __name__ == "__main__":
     loss_fn = torch.nn.CrossEntropyLoss()
     softmax_pred = False
     optim = torch.optim.AdamW([
-        {'params': model.base_model.parameters(), 'lr': 1e-4, 'weigh_decay': 0.2}
+        {'params': model.base_model.parameters(), 'lr': 1e-5, 'weigh_decay': 0.1}
         ],
         betas=(0.7, 0.999))
     schedule = {
