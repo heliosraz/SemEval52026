@@ -1,0 +1,40 @@
+program: main.py
+method: random
+metric:
+  goal: minimize
+  name: valid_loss
+parameters:
+  learning_rate:
+    max: 1e-5
+    min: 5e-5
+    distribution: uniform
+  weight_decay:
+    max: 
+    min: 0.05
+    distribution: uniform
+  architecture:
+    values:
+      - PretrainedGeneralistModel
+    distribution: categorical
+  architecture:
+    values:
+      - GeneralistModel_nosep
+      - GeneralistModel
+    distribution: categorical
+  encoder:
+    values:
+      - google-bert/bert-base-cased
+      - FacebookAI/roberta-base
+      - answerdotai/ModernBERT-large
+      - distilbert/distilbert-base-cased
+      - microsoft/deberta-v3-base
+    distribution: categorical
+  dataset:
+    values:
+      - dev_augmented.json
+    distribution: categorical
+  epochs:
+    max: 200
+    min: 50
+    distribution: int_uniform
+

@@ -12,11 +12,19 @@ import torch
 import numpy as np
 import json
 from typing import List, Dict, Tuple, Any
+import wandb
 
 '''
 To run script:
 python main.py "sentence-transformers/all-roberta-large-v1" data/train.json data/dev.json
 '''
+
+if torch.cuda.is_available():
+    device = torch.device("cuda") 
+elif torch.mps.is_available():
+    device = torch.device("mps")
+else: 
+    device = torch.device("cpu")
 
 class WordSenseData(Dataset):
     def __init__(self, df: pd.DataFrame):
@@ -28,9 +36,8 @@ class WordSenseData(Dataset):
                 "stdev": self.data.loc[idx, "stdev"],
                 "index": self.data.loc[idx, 'index'],
                 "homonym": self.data.loc[idx, 'homonym'],
-                "context": self.data.loc[idx, 'context'],
-                "judged_meaning": self.data.loc[idx, "judged_meaning"],
-                "example_sentence": self.data.loc[idx, 'example_sentence']}
+                "source": self.data.loc[idx, 'context'],
+                "target": self.data.loc[idx, "judged_meaning"]]}
     
 class AugWordSenseData(Dataset):
     def __init__(self, df: pd.DataFrame):
@@ -55,12 +62,6 @@ os.makedirs("checkpoint", exist_ok = True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
 task_dataset = {'data': WordSenseData, 'classifier': WordSenseData,'finetuning': CrossAttentionData,'pretraining':AugWordSenseData}
 
-if torch.cuda.is_available():
-    device = torch.device("cuda") 
-elif torch.mps.is_available():
-    device = torch.device("mps")
-else: 
-    device = torch.device("cpu")
 
 def train(
         model,
@@ -154,6 +155,8 @@ def train(
         print('LOSS train {} dev {}'.format(avg_loss, avg_vloss))
         print('ACCURACY train {} dev {}'.format(running_tacc/len(train_set), running_vacc/len(dev_set)))
         
+        record.log({"train_loss":avg_loss, "train_acc":running_tacc/len(train_set), "val_loss":avg_vloss, "val_acc":running_vacc/len(dev_set)})
+        
         train_loss_record.append(avg_loss)
         train_acc_record.append(running_tacc/len(train_set))
         dev_loss_record.append(avg_vloss)
@@ -181,8 +184,8 @@ def train(
             state_dict = save_model(model, metrics, model_dir, model_name)
             if save_weights_plots:
                 plot_linear_weights(
-                    [param.data for name, param in state_dict.items()],
-                    [name for name, _ in state_dict.items()],
+                    [model.base_model.K.weight, model.base_model.Q.weight, model.base_model.V.weight],
+                    ["model.base_model.K", "model.base_model.Q", "model.base_model.V"],
                     running_tacc/len(train_set),
                     running_vacc/len(dev_set),
                     avg_loss,
@@ -192,7 +195,7 @@ def train(
             
     return model_path
 
-def run(model, data: pd.DataFrame):
+def eval(model, data: pd.DataFrame):
     loader = DataLoader(data, 
                     batch_size= 64,)
     res = pd.DataFrame(columns = ["id", "prediction"])
@@ -270,29 +273,45 @@ if __name__ == "__main__":
     dev_set = task_dataset[task](dev_df)
 
     ## Training parameters
+    base = models.GeneralistModel_nosep
     if base_model:
         model = models.PretrainedGeneralistModel(
             base=models.GeneralistModel_nosep,
             model_name=base_model).to(device)
     else:
         model = models.PretrainedGeneralistModel(
-            base=models.GeneralistModel_nosep,).to(device)
+            base=models.GeneralistModel_nosep).to(device)
     input_tags = ["source", "target"]
     label_tag = "mask"
     metric_label = "mask"
     def accuracy(preds, labels):
         return sum([pred==l for pred, l in zip(preds, labels)])
+    def accuracy_range(preds, labels):
+        return sum([m[0]<=pred<=m[1] for pred, m in zip(preds, labels)])
         # return sum([])
     metric = accuracy
     loss_fn = torch.nn.CrossEntropyLoss()
     softmax_pred = False
     optim = torch.optim.AdamW([
-        {'params': model.base_model.parameters(), 'lr': 1e-5, 'weigh_decay': 0.1}
+        {'params': model.base_model.parameters(), 'lr': 1e-5, 'weight_decay': 0.1}
         ],
         betas=(0.7, 0.999))
-    schedule = {
+    scheduler = torch.optim.lr_scheduler.LRScheduler(optim, last_epoch=-1)
+    freeze_schedule = {
         0: ([model.classifier],[])}
     mask = True
+    
+    record = wandb.init(
+        entity="heliosra-n-a",
+        project="2026set5",
+        config={
+            "learning_rate": 0.1e-5,
+            "weight_decay": 0.1,
+            "architecture": f"PretrainedGeneralistModel.GeneralistModel_nosep.{base_model}",
+            "dataset": argv[2].split('/')[-1],
+            "epochs": 100,
+        },
+    )
     
     # Double checking config feasibility
     if (type(loss_fn), softmax_pred) == (torch.nn.CrossEntropyLoss, True) or \
@@ -320,11 +339,13 @@ if __name__ == "__main__":
                     freeze_schedule = schedule,
                     metric = metric,
                     mask = mask,
+                    n_epochs = 100,
                     softmax_pred = softmax_pred
                     )
-    # model_path = "checkpoint/all-mpnet-base-v2_20260109_010623_49.safetensors"
-    load_model(model, model_path)
-    res = run(model, dev_set)
     
-    ## Saving Results
-    res.to_json(f"predictions-{base_model.split("/")[-1]}.jsonl",orient="records",lines=True)
+    # model_path = "checkpoint/all-mpnet-base-v2_20260109_010623_49.safetensors"
+    # load_model(model, model_path)
+    # res = eval(model, dev_set)
+    
+    # ## Saving Results
+    # res.to_json(f"predictions-{base_model.split('/')[-1]}.jsonl",orient="records",lines=True)

@@ -271,6 +271,7 @@ class GeneralistModel_nosep(torch.nn.Module):
             max_length = 512,
             d_attn = 128):
         super().__init__()
+        self.name = model_name
         self.model = ContextEmbedModule(model_name = model_name,
                                         max_length = max_length)
         # for param in self.model.parameters():
@@ -377,6 +378,7 @@ class GeneralistModel(torch.nn.Module):
             max_length = 512,
             d_attn = 128):
         super().__init__()
+        self.name = model_name
         self.model = ContextEmbedModule(model_name = model_name,
                                         max_length = max_length)
         for param in self.model.parameters():
@@ -506,6 +508,7 @@ class GeneralistModelScored(torch.nn.Module):
             max_length = 512,
             d_attn = 128):
         super().__init__()
+        self.name = model_name
         self.base_model = GeneralistModel(model_name, max_length, d_attn)
         self.classifier = ClassifierModule(input_len = d_attn, hidden_sizes = [])
         
@@ -523,6 +526,7 @@ class PretrainedGeneralistModel(torch.nn.Module):
         max_length = 512,
         d_attn = 128):
         super().__init__()
+        self.name = model_name
         self.base_model = base(model_name, max_length, d_attn)
         vocab_size = self.base_model.get_vocab_size()
         self.classifier = ClassifierModule(
