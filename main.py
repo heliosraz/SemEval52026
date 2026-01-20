@@ -276,8 +276,7 @@ if __name__ == "__main__":
             model_name=base_model).to(device)
     else:
         model = models.PretrainedGeneralistModel(
-            base=models.GeneralistModel_nosep,
-            model_name="FacebookAI/roberta-base").to(device)
+            base=models.GeneralistModel_nosep,).to(device)
     input_tags = ["source", "target"]
     label_tag = "mask"
     metric_label = "mask"

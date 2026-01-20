@@ -273,8 +273,8 @@ class GeneralistModel_nosep(torch.nn.Module):
         super().__init__()
         self.model = ContextEmbedModule(model_name = model_name,
                                         max_length = max_length)
-        for param in self.model.parameters():
-            param.requires_grad = False
+        # for param in self.model.parameters():
+        #     param.requires_grad = False
         self.max_length = max_length
         n = self.model.get_embedding_size()
         self.K = torch.nn.Linear(n, d_attn, bias=False)
