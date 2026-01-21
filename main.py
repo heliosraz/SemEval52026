@@ -351,7 +351,6 @@ if __name__ == "__main__":
                     loss_fn = loss_fn,
                     optimizer = optim,
                     lr_scheduler = scheduler,
-                    softmax_pred = softmax_pred,
                     metric = metric,
                     n_epochs = config.epochs,
                     batch_size = config.batch_size,
