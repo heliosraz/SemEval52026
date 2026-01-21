@@ -27,11 +27,9 @@ def augment_data(path):
     for _, row in data.iterrows():
         for target, reference in itertools.product(
                                                 [
-                                                    row["judged_meaning"],
-                                                    row["example_sentence"]
+                                                    row["judged_meaning"]
                                                 ],
                                                 [
-                                                    row["example_sentence"],
                                                     row["context"],
                                                     row["ending"]
                                                     ]
@@ -46,9 +44,18 @@ def augment_data(path):
                 stdev.masked_fill_(stdev==0, float("1e-20"))
                 aug_data["probs"] += sample_distribution(stdev, average).tolist()
                 aug_data["interval"] += [(row["average"]+row["stdev"], row["average"]-row["stdev"]), (4,4)]
+            aug_data["target"] += [row["judged_meaning"]]
+            aug_data["source"] += [row["example_sentence"]]
+            aug_data["stdev"] += [0]
+            aug_data["average"] += [4]
+            stdev = torch.Tensor([0])
+            average = torch.Tensor([4])
+            stdev.masked_fill_(stdev==0, float("1e-20"))
+            aug_data["probs"] += sample_distribution(stdev, average).tolist()
+            aug_data["interval"] += [(4,4)]
     aug_data = pd.DataFrame(aug_data)
     aug_data.to_json(
-        os.path.join(root, "{}_augmented.json".format(split)),
+        os.path.join(root, "pretraining", "{}_augmented.json".format(split)),
         orient="index",
         indent = 4)
     
@@ -65,6 +72,6 @@ def add_context(path):
 if __name__ == "__main__":
     root = os.path.join(".","data")
     for f_name in ["train.json", "dev.json"]:
-        add_context(os.path.join(root, f_name))
-        # augment_data(os.path.join(root, f_name))
+        # add_context(os.path.join(root, f_name))
+        augment_data(os.path.join(root, f_name))
 # 

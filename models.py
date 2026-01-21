@@ -35,12 +35,19 @@ class ClassifierModule(torch.nn.Module):
             self.layers = torch.nn.ModuleList(layers)
         else:
             self.layers = torch.nn.ModuleList([torch.nn.Linear(input_len, output_len)])
+        self.train_mode = False
+    
+    def train(self):
+        self.train_mode = True
+    
+    def eval(self):
+        self.train_mode = False
             
-    def forward(self, x, drop_p=0.3, train = False):
+    def forward(self, x, drop_p=0.3):
         for layer in self.layers[:-1]:
             x = layer(x)
             x = torch.tanh(x)
-            x = torch.dropout(x, drop_p, train = train)
+            x = torch.dropout(x, drop_p, train = self.train_mode)
         return self.layers[-1](x)
 
 class RefineModule(torch.nn.Module):
@@ -269,7 +276,8 @@ class GeneralistModel_nosep(torch.nn.Module):
     def __init__(self,
             model_name = "google-bert/bert-base-cased",
             max_length = 512,
-            d_attn = 128):
+            d_attn = 128,
+            dropout_p = 0.4):
         super().__init__()
         self.name = model_name
         self.model = ContextEmbedModule(model_name = model_name,
@@ -284,7 +292,14 @@ class GeneralistModel_nosep(torch.nn.Module):
         torch.nn.init.xavier_normal_(self.K.weight)  
         torch.nn.init.xavier_normal_(self.Q.weight) 
         torch.nn.init.xavier_normal_(self.V.weight) 
-        self.dropout = torch.nn.Dropout(0.3)
+        self.drop_attn = dropout_p
+        self.train_mode = False
+    
+    def train(self):
+        self.train_mode = True
+    
+    def eval(self):
+        self.train_mode = False
         
     def get_vocab_size(self):
         return self.model.tokenizer.vocab_size
@@ -298,8 +313,7 @@ class GeneralistModel_nosep(torch.nn.Module):
                         dropout_p=0.3,
                         is_causal=False,
                         scale=None,
-                        enable_gqa=False,
-                        train = False) -> torch.Tensor:
+                        enable_gqa=False) -> torch.Tensor:
         b, L, S = query.size(0), query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         attn_bias = torch.zeros(b, L, S, dtype=query.dtype, device=query.device)
@@ -322,10 +336,10 @@ class GeneralistModel_nosep(torch.nn.Module):
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
         attn_weight += attn_bias
         attn_weight = torch.softmax(attn_weight, dim = -1) 
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=train)
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=self.train_mode)
         return attn_weight @ value
         
-    def forward(self, data:Dict, select = ["full_context", "judged_meaning"], mask = False, train = False,):
+    def forward(self, data:Dict, select = ["full_context", "judged_meaning"], mask = False):
         candidate_toks = self.model.tokenizer(
                                 data[select[1]],
                                 return_tensors = "pt",
@@ -360,7 +374,7 @@ class GeneralistModel_nosep(torch.nn.Module):
             key = refined_context,
             value = aggre_value,
             attn_mask = attn_mask,
-            train = train
+            dropout_p=self.drop_attn
             )
         
         return x, masks
@@ -376,7 +390,8 @@ class GeneralistModel(torch.nn.Module):
     def __init__(self,
             model_name = "google-bert/bert-base-cased",
             max_length = 512,
-            d_attn = 128):
+            d_attn = 128,
+            dropout_p = 0.4):
         super().__init__()
         self.name = model_name
         self.model = ContextEmbedModule(model_name = model_name,
@@ -390,8 +405,15 @@ class GeneralistModel(torch.nn.Module):
         self.V = torch.nn.Linear(n, d_attn, bias=False)
         torch.nn.init.xavier_normal_(self.K.weight)  
         torch.nn.init.xavier_normal_(self.Q.weight) 
-        torch.nn.init.xavier_normal_(self.V.weight) 
-        self.dropout = torch.nn.Dropout(0.3)
+        torch.nn.init.xavier_normal_(self.V.weight)
+        self.train_mode = False
+        self.drop_attn = dropout_p
+    
+    def train(self):
+        self.train_mode = True
+    
+    def eval(self):
+        self.train_mode = False
         
     def get_vocab_size(self):
         return self.model.tokenizer.vocab_size
@@ -405,8 +427,7 @@ class GeneralistModel(torch.nn.Module):
                         dropout_p=0.3,
                         is_causal=False,
                         scale=None,
-                        enable_gqa=False,
-                        train = False) -> torch.Tensor:
+                        enable_gqa=False) -> torch.Tensor:
         b, L, S = query.size(0), query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         attn_bias = torch.zeros(b, L, S, dtype=query.dtype, device=query.device)
@@ -429,10 +450,10 @@ class GeneralistModel(torch.nn.Module):
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
         attn_weight += attn_bias
         attn_weight = torch.softmax(attn_weight, dim = -1) 
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=train)
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=self.train_mode)
         return attn_weight @ value
         
-    def forward(self, data:Dict, select = ["full_context", "judged_meaning"], mask = False, train = False,):
+    def forward(self, data:Dict, select = ["full_context", "judged_meaning"], mask = False):
         data["sep"] = [self.model.tokenizer.sep_token]*len(data[select[0]])
         sep_toks = self.model.tokenizer(
                                 data["sep"],
@@ -497,7 +518,7 @@ class GeneralistModel(torch.nn.Module):
             key = refined_context,
             value = aggre_value,
             attn_mask = attn_mask,
-            train = train
+            dropout_p=self.drop_attn
             )
         
         return x, masks
@@ -506,16 +527,28 @@ class GeneralistModelScored(torch.nn.Module):
     def __init__(self,
             model_name = "google-bert/bert-base-cased",
             max_length = 512,
-            d_attn = 128):
+            d_attn = 128,
+            drop_attn = 0.4,
+            drop_cls = 0.4):
         super().__init__()
         self.name = model_name
-        self.base_model = GeneralistModel(model_name, max_length, d_attn)
+        self.base_model = GeneralistModel(model_name, max_length, d_attn, dropout_p=drop_attn)
         self.classifier = ClassifierModule(input_len = d_attn, hidden_sizes = [])
+        self.train_mode = False
+        self.drop_cls = drop_cls
+    
+    def train(self):
+        self.base_model.train()
+        self.train_mode = True
+    
+    def eval(self):
+        self.base_model.eval()
+        self.train_mode = False
         
-    def forward(self, data, select = ["full_context", "judged_meaning"], mask = False, train = False):
-        x, mask_res = self.base_model(data, select, mask=mask, train=train)
+    def forward(self, data, select = ["full_context", "judged_meaning"], mask = False):
+        x, mask_res = self.base_model(data, select, mask=mask)
         x = x.max(dim = 1)[0]
-        y = self.classifier(x)
+        y = self.classifier(x, self.drop_cls)
         return y, mask_res
     
 class PretrainedGeneralistModel(torch.nn.Module):
@@ -524,25 +557,35 @@ class PretrainedGeneralistModel(torch.nn.Module):
         base = GeneralistModel,
         model_name = "google-bert/bert-base-cased",
         max_length = 512,
-        d_attn = 128):
+        d_attn = 128,
+        drop_attn = 0.4,
+        drop_cls = 0.4):
         super().__init__()
         self.name = model_name
-        self.base_model = base(model_name, max_length, d_attn)
+        self.base_model = base(model_name, max_length, d_attn, dropout_p = drop_attn)
         vocab_size = self.base_model.get_vocab_size()
         self.classifier = ClassifierModule(
             input_len = d_attn,
             output_len = vocab_size)
-        for param in self.classifier.parameters():
-            param.requires_grad = False
+        self.train_mode = False
+        self.drop_cls = drop_cls
+    
+    def train(self):
+        self.base_model.train()
+        self.train_mode = True
+    
+    def eval(self):
+        self.base_model.eval()
+        self.train_mode = False
         
-    def forward(self, data, select = ["full_context", "candidate"], mask = True, train = True):
-        x, mask_res = self.base_model(data, mask = mask, select = select, train=train) # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]
+    def forward(self, data, select = ["full_context", "judged_meaning"], mask = True):
+        x, mask_res = self.base_model(data, mask = mask, select = select) # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]
         if mask:
             mask_inds = mask_res["mask_inds"]
             x = x[torch.arange(x.shape[0]), mask_inds, :] # [batch, q_seq, d_attn] -> [16, 1, d_attn]
         else:
             x = x.max(dim = 1)[0].unsqueeze(1)
-        y = self.classifier(x) # [16, 1, d_attn] -> [16, class_out]
+        y = self.classifier(x, self.drop_cls) # [16, 1, d_attn] -> [16, class_out]
         return y, mask_res
         
 

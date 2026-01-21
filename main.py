@@ -13,6 +13,8 @@ import numpy as np
 import json
 from typing import List, Dict, Tuple, Any
 import wandb
+import metrics
+from transformers import get_cosine_schedule_with_warmup
 
 '''
 To run script:
@@ -37,7 +39,7 @@ class WordSenseData(Dataset):
                 "index": self.data.loc[idx, 'index'],
                 "homonym": self.data.loc[idx, 'homonym'],
                 "source": self.data.loc[idx, 'context'],
-                "target": self.data.loc[idx, "judged_meaning"]]}
+                "target": self.data.loc[idx, "judged_meaning"]}
     
 class AugWordSenseData(Dataset):
     def __init__(self, df: pd.DataFrame):
@@ -60,7 +62,23 @@ class CrossAttentionData(Dataset):
 
 os.makedirs("checkpoint", exist_ok = True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
-task_dataset = {'data': WordSenseData, 'classifier': WordSenseData,'finetuning': CrossAttentionData,'pretraining':AugWordSenseData}
+
+task_dataset = {
+    'data': WordSenseData,
+    'classifier': CrossAttentionData,
+    'finetuning': CrossAttentionData,
+    'pretraining':AugWordSenseData
+    }
+model_key = {
+    'GeneralistModel_nosep': models.GeneralistModel_nosep,
+    'GeneralistModel': models.GeneralistModel,
+    'PretrainedGeneralistModel': models.PretrainedGeneralistModel,
+    'PretrainedGeneralistModel': models.PretrainedGeneralistModel
+    }
+metric_key = {
+    "mask": metrics.accuracy,
+    "average": metrics.range,
+}
 
 
 def train(
@@ -69,36 +87,29 @@ def train(
         dev_set: Dataset,
         loss_fn: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
-        softmax_pred: bool,
+        lr_scheduler: torch.optim.lr_scheduler.LambdaLR,
         input_tags: str|List[str] = ["full_context", "judged_meaning"],
         label_tag: str = "label",
         metric_label: str = "label",
+        softmax_pred: bool = False,
         metric = None,
         n_epochs: int = 100,
         batch_size=64,
         freeze_schedule: Dict[int,(Tuple[List[torch.Tensor]]|Any)] = {},
         save_weights_plots: bool = True,
-
         mask: bool = False):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    train_set = Subset(train_set, range(200))
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
                         shuffle=True,)
-    dev_set = Subset(train_set, range(10))
     dev_loader = DataLoader(dev_set, 
                         batch_size=batch_size)
     
-    train_loss_record = []
-    train_acc_record = []
-    dev_loss_record = []
-    dev_acc_record = []
-    
     best_vloss = 1_000_000.
     for epoch in tqdm(range(n_epochs),desc="Epochs:", position = 0):
-        if epoch in schedule:
+        if epoch in freeze_schedule:
             # Freeze
             for layer in freeze_schedule[epoch][0]:
                 for param in layer.parameters():
@@ -119,7 +130,7 @@ def train(
                 # 2. create a tag to disable model tokenizing
             X_batch = batch
             optimizer.zero_grad()
-            y_pred, mask_keys = model(X_batch, select = input_tags, mask = mask, train = True)
+            y_pred, mask_keys = model(X_batch, select = input_tags, mask = mask)
             batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
             y_labels = torch.stack(batch[label_tag], dim = 1).float() if type(batch[label_tag])==list else batch[label_tag]
             if softmax_pred:
@@ -127,6 +138,7 @@ def train(
             loss = loss_fn(y_pred, y_labels.to(device))
             loss.backward()
             optimizer.step()
+            lr_scheduler.step()
             running_loss += loss.item()
             # print(loss.item())
             y_metric = torch.stack(batch[metric_label], dim = 1).float() \
@@ -141,7 +153,7 @@ def train(
         running_vacc = 0
         with torch.no_grad():
             for v_batch in tqdm(dev_loader, desc="Dev Batch:", leave = False):
-                v_pred, mask_keys = model(X_batch, select = input_tags, mask = mask, train = True)
+                v_pred, mask_keys = model(X_batch, select = input_tags, mask = mask)
                 v_batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
                 v_labels = torch.stack(v_batch[label_tag], dim = 1).float() if type(v_batch[label_tag])==list else v_batch[label_tag]
                 v_loss = loss_fn(v_pred, v_labels.to(device))
@@ -155,33 +167,20 @@ def train(
         print('LOSS train {} dev {}'.format(avg_loss, avg_vloss))
         print('ACCURACY train {} dev {}'.format(running_tacc/len(train_set), running_vacc/len(dev_set)))
         
-        record.log({"train_loss":avg_loss, "train_acc":running_tacc/len(train_set), "val_loss":avg_vloss, "val_acc":running_vacc/len(dev_set)})
-        
-        train_loss_record.append(avg_loss)
-        train_acc_record.append(running_tacc/len(train_set))
-        dev_loss_record.append(avg_vloss)
-        dev_acc_record.append(running_vacc/len(dev_set))
+        run.log({"train_loss":avg_loss, "train_acc":running_tacc/len(train_set), "valid_loss":avg_vloss, "valid_acc":running_vacc/len(dev_set)})
 
         # Track best performance, and save the model's state
         if avg_vloss < best_vloss:
             
             best_vloss = avg_vloss
             model_name = "{}_{}_{}".format(
-                                        base_model.split("/")[-1],
+                                        model.name.split("/")[-1],
                                         timestamp,
                                         epoch)
             model_dir = "checkpoint/{}".format(model_name)
             os.makedirs(model_dir, exist_ok = True)
             
-            metrics = {
-                "train": {
-                        "loss": train_loss_record,
-                        "acc": train_acc_record},
-                "dev": {
-                        "loss": dev_loss_record,
-                        "acc": dev_acc_record}}
-            
-            state_dict = save_model(model, metrics, model_dir, model_name)
+            state_dict = save_model(model, model_dir, model_name)
             if save_weights_plots:
                 plot_linear_weights(
                     [model.base_model.K.weight, model.base_model.Q.weight, model.base_model.V.weight],
@@ -192,6 +191,8 @@ def train(
                     avg_vloss,
                     "checkpoint/{}/{}.png".format(model_name,model_name)
                     )
+        if avg_vloss>20:
+            break
             
     return model_path
 
@@ -240,78 +241,77 @@ def plot_linear_weights(weights_list, layer_names, train_acc, dev_acc, train_los
         
 def save_model(
                 model,
-                metrics,
                 model_dir = "./checkpoint",
                 model_name = "model"):
     model_fpath = os.path.join(model_dir,'{}.safetensors'.format(model_name,model_name))
-    model_mpath = os.path.join(model_dir,'{}_metrics.json'.format(model_name,model_name))
     state_dict = {
         name: param 
         for name, param in model.named_parameters() 
         if param.requires_grad
     }
     save_file(state_dict, model_fpath)
-    with open(model_mpath, "w") as f:
-        json.dump(metrics, f, indent = 4)
     return state_dict
 
 if __name__ == "__main__":
-    ## Data Processing
-    if len(argv)<3:
-        print("No data files were provided.")
-        exit(1)
-    elif len(argv)==3:
-        base_model = ""
-        train_df = load_data(argv[1])
-        dev_df = load_data(argv[2])
-    else:
-        base_model = argv[1]
-        train_df = load_data(argv[2])
-        dev_df = load_data(argv[3])
-    task = argv[2].split('/')[-2]
+    run = wandb.init(
+        entity="heliosra-n-a",
+        project="2026set5",
+        )
+    config = wandb.config
+    
+    task = "pretraining"
+    train_df = load_data(config.train_data)
+    dev_df = load_data(config.dev_data)
     train_set = task_dataset[task](train_df)
     dev_set = task_dataset[task](dev_df)
 
     ## Training parameters
-    base = models.GeneralistModel_nosep
-    if base_model:
-        model = models.PretrainedGeneralistModel(
-            base=models.GeneralistModel_nosep,
-            model_name=base_model).to(device)
-    else:
-        model = models.PretrainedGeneralistModel(
-            base=models.GeneralistModel_nosep).to(device)
+    base = model_key[config.architecture]
+    wrapper = model_key[config.wrapper]
+    model_name = config.encoder
+    model = wrapper(
+        base=base,
+        model_name=model_name,
+        d_attn=config.d_attn,
+        drop_attn = config.drop_attn,
+        drop_cls = config.drop_cls).to(device)
+    
     input_tags = ["source", "target"]
     label_tag = "mask"
     metric_label = "mask"
-    def accuracy(preds, labels):
-        return sum([pred==l for pred, l in zip(preds, labels)])
-    def accuracy_range(preds, labels):
-        return sum([m[0]<=pred<=m[1] for pred, m in zip(preds, labels)])
-        # return sum([])
-    metric = accuracy
-    loss_fn = torch.nn.CrossEntropyLoss()
+    metric = metric_key[metric_label]
+    
     softmax_pred = False
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optim_params = {
+        "betas": (0.7, 0.999),
+        "lr": config.lr_others,
+        "weight_decay": config.weight_decay_other
+        }
     optim = torch.optim.AdamW([
-        {'params': model.base_model.parameters(), 'lr': 1e-5, 'weight_decay': 0.1}
+        {
+            'params': model.base_model.model.parameters(),
+            'lr': config.lr_encoder_pre,
+            'weight_decay': config.weight_decay_encoder
+            },
+        {
+            'params': [param \
+                for name, param in model.base_model.named_parameters() \
+                    if "K" in name or "Q" in name or "V" in name],
+            'lr': config.lr_encoder,
+            'weight_decay': config.weight_decay_encoder
+            }
         ],
         betas=(0.7, 0.999))
-    scheduler = torch.optim.lr_scheduler.LRScheduler(optim, last_epoch=-1)
+    total_steps = len(train_set)//config.batch_size*config.epochs
+    scheduler = get_cosine_schedule_with_warmup(
+        optim,
+        num_warmup_steps=total_steps*10,
+        num_training_steps=total_steps*90
+    )
     freeze_schedule = {
         0: ([model.classifier],[])}
     mask = True
-    
-    record = wandb.init(
-        entity="heliosra-n-a",
-        project="2026set5",
-        config={
-            "learning_rate": 0.1e-5,
-            "weight_decay": 0.1,
-            "architecture": f"PretrainedGeneralistModel.GeneralistModel_nosep.{base_model}",
-            "dataset": argv[2].split('/')[-1],
-            "epochs": 100,
-        },
-    )
     
     # Double checking config feasibility
     if (type(loss_fn), softmax_pred) == (torch.nn.CrossEntropyLoss, True) or \
@@ -336,16 +336,11 @@ if __name__ == "__main__":
                     metric_label = metric_label,
                     loss_fn = loss_fn,
                     optimizer = optim,
-                    freeze_schedule = schedule,
+                    lr_scheduler = scheduler,
+                    softmax_pred = softmax_pred,
                     metric = metric,
+                    n_epochs = config.epochs,
+                    batch_size = config.batch_size,
+                    freeze_schedule = freeze_schedule,
                     mask = mask,
-                    n_epochs = 100,
-                    softmax_pred = softmax_pred
                     )
-    
-    # model_path = "checkpoint/all-mpnet-base-v2_20260109_010623_49.safetensors"
-    # load_model(model, model_path)
-    # res = eval(model, dev_set)
-    
-    # ## Saving Results
-    # res.to_json(f"predictions-{base_model.split('/')[-1]}.jsonl",orient="records",lines=True)
