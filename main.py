@@ -101,9 +101,11 @@ def train(
         batch_size=64,
         freeze_schedule: Dict[int,(Tuple[List[torch.Tensor]]|Any)] = {},
         save_weights_plots: bool = True,
-        mask: bool = False):
+        mask: bool = False,
+        k: int = 2):
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    top_k = []
     
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
@@ -183,8 +185,11 @@ def train(
                                         epoch)
             model_dir = "checkpoint/{}".format(model_name)
             os.makedirs(model_dir, exist_ok = True)
-            
-            state_dict = save_model(model, model_dir, model_name)
+            state_dict = get_state_dict(model)
+            top_k.append(state_dict)
+            if len(top_k)>k:
+                top_k.pop(0)
+            # save_model(state_dict, model_dir, model_name)
             if save_weights_plots:
                 plot_linear_weights(
                     [model.base_model.K.weight, model.base_model.Q.weight, model.base_model.V.weight],
@@ -197,7 +202,7 @@ def train(
                     )
         if avg_vloss>20:
             break
-            
+    save_model(top_k, model_dir, model_name)
     return model_dir
 
 def eval(model, data: pd.DataFrame):
@@ -244,19 +249,21 @@ def plot_linear_weights(weights_list, layer_names, train_acc, dev_acc, train_los
     wandb.log({"weights_visualization": wandb.Image(save_path)})
     plt.close('all')
 
-        
-def save_model(
-                model,
-                model_dir = "./checkpoint",
-                model_name = "model"):
-    model_fpath = os.path.join(model_dir,'{}.safetensors'.format(model_name,model_name))
+def get_state_dict(model):
     state_dict = {
         name: param 
         for name, param in model.named_parameters() 
         if param.requires_grad
     }
-    save_file(state_dict, model_fpath)
     return state_dict
+
+def save_model(
+                stat_dicts,
+                model_dir = "./checkpoint",
+                model_name = "model"):
+    model_fpath = os.path.join(model_dir,'{}.safetensors'.format(model_name,model_name))
+    for state_dict in stat_dicts:
+        save_file(state_dict, model_fpath)
 
 if __name__ == "__main__":
     run = wandb.init(
