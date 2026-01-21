@@ -244,9 +244,8 @@ def plot_linear_weights(weights_list, layer_names, train_acc, dev_acc, train_los
     fig.text(0.5, 0.02, caption, ha='center', fontsize=11, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
     
     plt.tight_layout(rect=[0, 0.05, 1, 1])  # Leave space for caption
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    print(f"Figure saved to {save_path}")
-    wandb.log({"weights_visualization": wandb.Image(save_path)})
+    wandb.log({"weights_visualization": wandb.Image(fig)})
+    print(f"Figure saved to wandb")
     plt.close('all')
 
 def get_state_dict(model):
