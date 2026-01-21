@@ -270,11 +270,13 @@ if __name__ == "__main__":
         entity="heliosra-n-a",
         project="2026set5",
         settings=wandb.Settings(
-            _disable_stats=True,
-            _stats_sample_rate_seconds=60,
-            _stats_samples_to_average=5,
+            # Disable system stats entirely (easiest option)
+            x_disable_stats=True,
+            console="off",
+            save_code=False,
+            quiet=True,
         )
-        )
+    )
     config = wandb.config
     
     task = "pretraining"
@@ -324,8 +326,8 @@ if __name__ == "__main__":
     total_steps = len(train_set)//config.batch_size*config.epochs
     scheduler = get_cosine_schedule_with_warmup(
         optim,
-        num_warmup_steps=total_steps*10,
-        num_training_steps=total_steps*90
+        num_warmup_steps=total_steps*.10,
+        num_training_steps=total_steps*.90
     )
     freeze_schedule = {
         0: ([model.classifier],[])}

@@ -62,7 +62,7 @@ parameters:
     values:
       - google-bert/bert-base-cased
       - FacebookAI/roberta-base
-      - answerdotai/ModernBERT-large
+      - answerdotai/ModernBERT-base
       - distilbert/distilbert-base-cased
       - microsoft/deberta-v3-base
     distribution: categorical
