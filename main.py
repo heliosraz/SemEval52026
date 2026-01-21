@@ -139,7 +139,7 @@ def train(
             y_labels = torch.stack(batch[label_tag], dim = 1).float() if type(batch[label_tag])==list else batch[label_tag]
             if softmax_pred:
                 y_pred = torch.softmax(y_pred, dim = 1)
-            loss = loss_fn(y_pred, y_labels.to(device))
+            loss = loss_fn(y_pred, y_labels.long().to(device))
             loss.backward()
             optimizer.step()
             lr_scheduler.step()
@@ -160,7 +160,7 @@ def train(
                 v_pred, mask_keys = model(X_batch, select = input_tags, mask = mask)
                 v_batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
                 v_labels = torch.stack(v_batch[label_tag], dim = 1).float() if type(v_batch[label_tag])==list else v_batch[label_tag]
-                v_loss = loss_fn(v_pred, v_labels.to(device))
+                v_loss = loss_fn(v_pred, v_labels.long().to(device))
                 
                 running_vloss += v_loss.item()
                 v_metric = torch.stack(v_batch[metric_label], dim = 1).float() \
