@@ -95,7 +95,6 @@ def train(
         input_tags: str|List[str] = ["full_context", "judged_meaning"],
         label_tag: str = "label",
         metric_label: str = "label",
-        softmax_pred: bool = False,
         metric = None,
         n_epochs: int = 100,
         batch_size=64,
@@ -139,9 +138,11 @@ def train(
             y_pred, mask_keys = model(X_batch, select = input_tags, mask = mask)
             batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
             y_labels = torch.stack(batch[label_tag], dim = 1).float() if type(batch[label_tag])==list else batch[label_tag]
-            if softmax_pred:
+            if type(loss_fn)==torch.nn.CrossEntropyLoss:
+                y_labels = y_labels.long()
+            else:
                 y_pred = torch.softmax(y_pred, dim = 1)
-            loss = loss_fn(y_pred, y_labels.long().to(device))
+            loss = loss_fn(y_pred, y_labels.to(device))
             loss.backward()
             optimizer.step()
             lr_scheduler.step()
@@ -300,7 +301,6 @@ if __name__ == "__main__":
     metric_label = "mask"
     metric = metric_key[metric_label]
     
-    softmax_pred = False
     loss_fn = torch.nn.CrossEntropyLoss()
     optim_params = {
         "betas": (0.7, 0.999),
@@ -333,12 +333,7 @@ if __name__ == "__main__":
     mask = True
     
     # Double checking config feasibility
-    if (type(loss_fn), softmax_pred) == (torch.nn.CrossEntropyLoss, True) or \
-        (type(loss_fn), softmax_pred) == (torch.nn.KLDivLoss, False):
-        raise TypeError("Loss function and prediction softmaxing mismatch. \
-                        Please check the training parameters:\n\
-                        type(loss_fun), softmax_pred = {},{}".format(type(loss_fn), softmax_pred))
-    elif (type(loss_fn), label_tag) == (torch.nn.CrossEntropyLoss, "probs") or \
+    if (type(loss_fn), label_tag) == (torch.nn.CrossEntropyLoss, "probs") or \
         (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "mask") or \
             (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "average"):
         raise TypeError("Loss function and label tag mismatch. \
