@@ -27,6 +27,10 @@ elif torch.mps.is_available():
     device = torch.device("mps")
 else: 
     device = torch.device("cpu")
+if device == torch.device("cuda"):
+    tensor_parallel = True
+else:
+    tensor_parallel = False
 
 class WordSenseData(Dataset):
     def __init__(self, df: pd.DataFrame):
@@ -194,7 +198,7 @@ def train(
         if avg_vloss>20:
             break
             
-    return model_path
+    return model_dir
 
 def eval(model, data: pd.DataFrame):
     loader = DataLoader(data, 
@@ -237,7 +241,9 @@ def plot_linear_weights(weights_list, layer_names, train_acc, dev_acc, train_los
     plt.tight_layout(rect=[0, 0.05, 1, 1])  # Leave space for caption
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"Figure saved to {save_path}")
-    plt.close()
+    wandb.log({"weights_visualization": wandb.Image(save_path)})
+    plt.close('all')
+
         
 def save_model(
                 model,
@@ -256,6 +262,11 @@ if __name__ == "__main__":
     run = wandb.init(
         entity="heliosra-n-a",
         project="2026set5",
+        settings=wandb.Settings(
+            _disable_stats=True,
+            _stats_sample_rate_seconds=60,
+            _stats_samples_to_average=5,
+        )
         )
     config = wandb.config
     
@@ -344,3 +355,4 @@ if __name__ == "__main__":
                     freeze_schedule = freeze_schedule,
                     mask = mask,
                     )
+    wandb.finish()
