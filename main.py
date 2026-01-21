@@ -159,7 +159,7 @@ def train(
         running_vacc = 0
         with torch.no_grad():
             for v_batch in tqdm(dev_loader, desc="Dev Batch:", leave = False):
-                v_pred, mask_keys = model(X_batch, select = input_tags, mask = mask)
+                v_pred, mask_keys = model(v_batch, select = input_tags, mask = mask)
                 v_batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
                 v_labels = torch.stack(v_batch[label_tag], dim = 1).float() if type(v_batch[label_tag])==list else v_batch[label_tag]
                 v_loss = loss_fn(v_pred, v_labels.long().to(device))
