@@ -105,7 +105,6 @@ def train(
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     top_k = []
-    
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
                         shuffle=True,)
@@ -162,8 +161,13 @@ def train(
             for v_batch in tqdm(dev_loader, desc="Dev Batch:", leave = False):
                 v_pred, mask_keys = model(v_batch, select = input_tags, mask = mask)
                 v_batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
-                v_labels = torch.stack(v_batch[label_tag], dim = 1).float() if type(v_batch[label_tag])==list else v_batch[label_tag]
-                v_loss = loss_fn(v_pred, v_labels.long().to(device))
+                v_labels = torch.stack(v_batch[label_tag], dim = 1).float() \
+                    if type(v_batch[label_tag])==list else v_batch[label_tag]
+                if type(loss_fn)==torch.nn.CrossEntropyLoss:
+                    y_labels = y_labels.long()
+                else:
+                    y_pred = torch.softmax(y_pred, dim = 1)
+                v_loss = loss_fn(v_pred, v_labels.to(device))
                 
                 running_vloss += v_loss.item()
                 v_metric = torch.stack(v_batch[metric_label], dim = 1).float() \
@@ -190,7 +194,6 @@ def train(
             top_k.append(state_dict)
             if len(top_k)>k:
                 top_k.pop(0)
-            # save_model(state_dict, model_dir, model_name)
             if save_weights_plots:
                 plot_linear_weights(
                     [model.base_model.K.weight, model.base_model.Q.weight, model.base_model.V.weight],
@@ -245,7 +248,7 @@ def plot_linear_weights(weights_list, layer_names, train_acc, dev_acc, train_los
     fig.text(0.5, 0.02, caption, ha='center', fontsize=11, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
     
     plt.tight_layout(rect=[0, 0.05, 1, 1])  # Leave space for caption
-    wandb.log({"weights_visualization": wandb.Image(fig)})
+    run.log({"weights_visualization": wandb.Image(fig)})
     print(f"Figure saved to wandb")
     plt.close('all')
 
@@ -265,12 +268,11 @@ def save_model(
     for state_dict in stat_dicts:
         save_file(state_dict, model_fpath)
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     run = wandb.init(
         entity="heliosra-n-a",
         project="2026set5",
         settings=wandb.Settings(
-            # Disable system stats entirely (easiest option)
             x_disable_stats=True,
             console="off",
             save_code=False,
@@ -358,3 +360,84 @@ if __name__ == "__main__":
                     mask = mask,
                     )
     wandb.finish()
+    ################
+    
+        
+    #     ## Data Processing
+    # if len(argv)<3:
+    #     print("No data files were provided.")
+    #     exit(1)
+    # elif len(argv)==3:
+    #     base_model = ""
+    #     train_df = load_data(argv[1])
+    #     dev_df = load_data(argv[2])
+    # else:
+    #     base_model = argv[1]
+    #     train_df = load_data(argv[2])
+    #     dev_df = load_data(argv[3])
+    # task = "pretraining"
+    # train_set = task_dataset[task](train_df)
+    # dev_set = task_dataset[task](dev_df)
+
+    # ## Training parameters
+    # if base_model:
+    #     model = models.PretrainedGeneralistModel(
+    #         base=models.GeneralistModel,
+    #         model_name=base_model).to(device)
+    # else:
+    #     model = models.PretrainedGeneralistModel(
+    #         base=models.GeneralistModel,).to(device)
+    # input_tags = ["source", "target"]
+    # label_tag = "mask"
+    # metric_label = "mask"
+    # epochs = 10
+    # batch_size = 32
+    # metric = metrics.accuracy
+    # loss_fn = torch.nn.CrossEntropyLoss()
+    # optim_params = {
+    #     "betas": (0.7, 0.999),
+    #     "lr": 1e-3,
+    #     "weight_decay": 0.2
+    #     }
+    # optim = torch.optim.AdamW([
+    #     {
+    #         'params': model.base_model.model.parameters(),
+    #         'lr': 1e-3,
+    #         'weight_decay':0.2
+    #         },
+    #     {
+    #         'params': [param \
+    #             for name, param in model.base_model.named_parameters() \
+    #                 if "K" in name or "Q" in name or "V" in name],
+    #         'lr': 1e-3,
+    #         'weight_decay': 0.2
+    #         }
+    #     ],
+    #     betas=(0.7, 0.999))
+    # total_steps = len(train_set)//batch_size*epochs
+    # scheduler = get_cosine_schedule_with_warmup(
+    #     optim,
+    #     num_warmup_steps=total_steps*.10,
+    #     num_training_steps=total_steps*.90
+    # )
+    # freeze_schedule = {
+    #     0: ([model.classifier],[])}
+    # mask = True
+    
+    # # Model Training and Eval
+    # model_path = train(
+    #                 model,
+    #                 train_set,
+    #                 dev_set,
+    #                 input_tags = input_tags,
+    #                 label_tag = label_tag,
+    #                 metric_label = metric_label,
+    #                 loss_fn = loss_fn,
+    #                 optimizer = optim,
+    #                 lr_scheduler = scheduler,
+    #                 metric = metric,
+    #                 n_epochs = epochs,
+    #                 batch_size = batch_size,
+    #                 freeze_schedule = freeze_schedule,
+    #                 mask = mask,
+    #                 )
