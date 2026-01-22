@@ -107,6 +107,7 @@ def train(
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     top_k = []
+    train_set = Subset(train_set, range(10))
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
                         shuffle=True,)
@@ -166,7 +167,7 @@ def train(
                 v_labels = torch.stack(v_batch[label_tag], dim = 1).float() \
                     if type(v_batch[label_tag])==list else v_batch[label_tag]
                 if type(loss_fn)==torch.nn.CrossEntropyLoss:
-                    v_labels = y_labels.long()
+                    v_labels = v_labels.long()
                 else:
                     v_pred = torch.softmax(v_pred, dim = 1)
                 v_loss = loss_fn(v_pred, v_labels.to(device))
