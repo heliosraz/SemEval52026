@@ -107,7 +107,7 @@ def train(
     from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     top_k = []
-    train_set = Subset(train_set, range(10))
+    # train_set = Subset(train_set, range(10))
     train_loader = DataLoader(train_set, 
                         batch_size=batch_size, 
                         shuffle=True,)
