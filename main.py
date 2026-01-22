@@ -27,6 +27,8 @@ elif torch.mps.is_available():
     device = torch.device("mps")
 else: 
     device = torch.device("cpu")
+print("DEVICE: {}".format(device))
+
 if device == torch.device("cuda"):
     tensor_parallel = True
 else:
@@ -164,9 +166,9 @@ def train(
                 v_labels = torch.stack(v_batch[label_tag], dim = 1).float() \
                     if type(v_batch[label_tag])==list else v_batch[label_tag]
                 if type(loss_fn)==torch.nn.CrossEntropyLoss:
-                    y_labels = y_labels.long()
+                    v_labels = y_labels.long()
                 else:
-                    y_pred = torch.softmax(y_pred, dim = 1)
+                    v_pred = torch.softmax(v_pred, dim = 1)
                 v_loss = loss_fn(v_pred, v_labels.to(device))
                 
                 running_vloss += v_loss.item()
