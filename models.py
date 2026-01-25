@@ -141,7 +141,6 @@ class ContextEmbedModule(torch.nn.Module):
         else:
             return embeds
             
-
 class ContextOffsetModule(torch.nn.Module):
     """Redundant consolidation of ContextEmbedModule
     TODO: refactor s.t. all instances of this module uses ContextEmbedModule
@@ -587,8 +586,80 @@ class PretrainedGeneralistModel(torch.nn.Module):
             x = x.max(dim = 1)[0].unsqueeze(1)
         y = self.classifier(x, self.drop_cls) # [16, 1, d_attn] -> [16, class_out]
         return y, mask_res
+
+class SynonymModule(GeneralistModel):
+    """TODO docstring"""
+    
+    def __init__(self,
+                 model_name: str = "google-bert/bert-base-cased",
+                 max_length: int = 512,
+                 d_attn: int = 128,
+                 dropout_p: float = 0.4,
+                 drop_cls: float = 0.4):
+        super().__init(model_name, max_length, d_attn, dropout_p)
+        self.name = model_name
+        self.model = ContextEmbedModule(model_name, max_length)
+        self.fc = ClassifierModule(input_len=d_attn, hidden_sizes=[])
+        self.drop_cls = drop_cls
+        self.max_length = max_length
+        n = self.model.get_embedding_size()
+        
+        self.K = torch.nn.Linear(n, d_attn, bias=False)
+        self.Q = torch.nn.Linear(n, d_attn, bias=False)
+        self.V = torch.nn.Linear(n, d_attn, bias=False)
+        torch.nn.init.xavier_normal_(self.K.weight)
+        torch.nn.init.xavier_normal_(self.Q.weight)
+        torch.nn.init.xavier_normal_(self.V.weight)
+        self.train_mode = False
+        self.drop_attn = dropout_p
+
         
 
+    def forward(self, data: Dict, select=["full_context", "homonym"], mask=False):
+        data["sep"] = [self.model.tokenizer.sep_token]*len(data)
+
+        sep_toks = self.model.tokenizer(data["sep"], return_tensors = "pt", padding=False).to(device)
+        sep_size = len(sep_toks["input_ids"][0])
+        
+        synonyms = list(map(self.wordnet_synonyms, data[select[1]]))
+        syn_toks = self.model.tokenizer(synonyms, return_tensors="pt",padding=False).to(device)
+
+        context_toks = self.model.tokenizer(data[select[0]],
+                                            return_tensors="pt",padding=False).to(device)
+        word_toks = self.model.tokenizer(data[select[1]],
+                                         return_tensors="pt", padding=False).to(device) 
+
+        input_seq = {"input_ids": torch.concat([syn_toks["input_ids"],
+                                                sep_toks["input_ids"],
+                                                context_toks["input_ids"],
+                                                word_toks["input_ids"]]),
+                     "attention_mask": torch.concat([syn_toks["attention_mask"],
+                                                    sep_toks["attention_mask"],
+                                                    context_toks["attention_mask"],
+                                                    word_toks["attention_mask"]])}
+
+                
+        
+        #TODO post-refiner attn layers
+        refined_ctx = self.K(context_embeds)
+        refined_syns = self.Q(cand_embeds)
+        aggre_value = self.V(context_embeds)
+        #TODO attn mask
+
+
+        x = self.scaled_dot_product_attention(refined_syns,
+                                              refined_ctx,
+                                              aggre_value,
+                                              attn_mask=attn_mask,
+                                              dropout_p=self.drop_attn)
+        return x, masks
+    def wordnet_synonyms(self, w: str) -> List[str]:
+        """TODO docstring"""
+        syns = wn.synonyms(w)
+        pairs = list(zip(["[SNS] " ] * len(syns), set(f"{wd[0]}" for wd in syns if wd)))
+        pairs.append(("[SNS] ", "[MISC]"))
+        return "".join("".join(p) for p in pairs)
+    
 ## these are for using sbert without explicit similarity metric (i.e feeding embeddings directly to ffn)
 class NoSimSentenceModule(torch.nn.Module):
     # sentence embedding module without similarity 
