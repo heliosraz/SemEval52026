@@ -9,7 +9,6 @@ model:
   drop_cls: 0.3
   fine_tune: false
   max_len: 512
-  max_neg_type_ratio: 1
 
 
 data:

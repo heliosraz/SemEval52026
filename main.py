@@ -387,13 +387,15 @@ def main(config):
     wrapper = model_key[config.model["wrapper"]]
     encoder = config.model["encoder"]
     model = wrapper(
-        base=base_model,
-        model_name=encoder,
+        base_type=base_model,
+        base_name=encoder,
         max_length=config.model["max_len"],
         d_attn=config.model["d_attn"],
         drop_attn=config.model["drop_attn"],
         drop_cls=config.model["drop_cls"],
     ).to(device)
+    if config.training["prev_path"]:
+        load_model(model, config.training["prev_path"])
 
     ## Training Parameters
     loss_fn = get_loss_fn(**config.training)

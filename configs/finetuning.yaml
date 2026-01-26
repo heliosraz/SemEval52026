@@ -1,15 +1,16 @@
 model:
   # Model Configuration
-  model_name: microsoft/deberta-v3-small # Hugging Face model
-  encoder: microsoft/deberta-v3-small # Hugging Face model
-  name: ""
-  max_width: 12
-  hidden_size: 768
-  drop_attn: 0.3
-  drop_cls: 0.4
+  name: "DefX-bert"
+  encoder: "google-bert/bert-base-cased" # Hugging Face model
+  architecture: "GeneralistModel"
+  wrapper: "GeneralistModelScored"
+  d_attn: 768
+  drop_attn: 0.4
+  drop_cls: 0.3
   fine_tune: false
   max_len: 512
   max_neg_type_ratio: 1
+
 
 data:
   # Directory Paths
@@ -19,8 +20,8 @@ data:
   input_tags:
     - "source"
     - "target"
-  label_tag: "mask"
-  metric_tag: "mask"
+  label_tag: "probs"
+  metric_tag: "range"
 
 
 training:
@@ -29,10 +30,12 @@ training:
   
   # Training Parameters
   train_batch_size: 64
+  epochs: 100
   warmup_ratio: 0.05
   scheduler_type: "cosine"  # Options: linear, cosine, constant
   
   # Loss Function Configuration
+  loss_type: "KLDivLoss"
   loss_betas:
     - 0.7
     - 0.999
@@ -40,11 +43,11 @@ training:
   masking: 1
   
   # Learning Rate and Weight Decay
-  lr_encoder: 1e-5
-  lr_others: 3e-5
+  lr_encoder: !!float 1e-5
+  lr_attn: !!float 5e-5
+  lr_others: !!float 3e-5
   weight_decay_encoder: 0.1
   weight_decay_other: 0.01
-  max_grad_norm: 10.0
   
   # Checkpoint Management
   save_total_limit: 3  # Maximum number of checkpoints to save
@@ -54,4 +57,8 @@ training:
   shuffle: true
   random_drop: true
   
-  freeze_components: ""
+  freeze_components:
+    0:
+      freeze:
+        - classifier
+      unfreeze: []
