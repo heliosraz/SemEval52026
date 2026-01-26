@@ -1,75 +1,81 @@
-program: main.py
-method: random
+early_terminate:
+  min_iter: 10
+  type: hyperband
+method: bayesian
 metric:
   goal: minimize
   name: valid_loss
 parameters:
-  epochs:
-    max: 100
-    min: 50
-    distribution: int_uniform
-  batch_size:
-    max: 256
-    min: 8
-    distribution: int_uniform
-  d_attn:
-    max: 128
-    min: 8
-    distribution: int_uniform
-  drop_attn:
-    max: 0.4
-    min: 0.2
-    distribution: uniform
-  drop_cls:
-    max: 0.3
-    min: 0.2
-    distribution: uniform
-  lr_encoder_pre:
-    max: 5e-5
-    min: 1e-5
-    distribution: uniform
-  lr_encoder:
-    max: 5e-5
-    min: 1e-5
-    distribution: uniform
-  lr_others: 
-    max: 5e-5
-    min: 3e-5
-    distribution: uniform
-  weight_decay_encoder:
-    max: 0.1
-    min: 0.01
-    distribution: uniform
-  weight_decay_other:
-    max: 0.1
-    min: 0.01
-    distribution: uniform
-  wrapper:
-    value: PretrainedGeneralistModel
-    distribution: constant
-  train_data:
-    value: data/pretraining/train_augmented.json
-    distribution: constant
-  dev_data:
-    value: data/pretraining/dev_augmented.json
-    distribution: constant
   architecture:
+    distribution: constant
+    value: GeneralistModel_nosep
+  batch_size:
     values:
-      - GeneralistModel_nosep
-      - GeneralistModel
-    distribution: categorical
+    - 32
+    - 64
+    - 128
+    - 256
+  d_attn:
+    values:
+    - 8
+    - 16
+    - 32
+  dev_data:
+    distribution: constant
+    value: data/pretraining/dev_augmented.json
+  drop_attn:
+    values:
+    - 0.2
+    - 0.3
+    - 0.4
+  drop_cls:
+    values:
+    - 0.2
+    - 0.3
+    - 0.4
   encoder:
-    values:
-      - google-bert/bert-base-cased
-      - FacebookAI/roberta-base
-      - answerdotai/ModernBERT-base
-      - distilbert/distilbert-base-cased
-      - microsoft/deberta-v3-base
     distribution: categorical
+    values:
+    - google-bert/bert-base-cased
+    - FacebookAI/roberta-base
+    - distilbert/distilbert-base-cased
+    - microsoft/deberta-v3-base
+  epochs:
+    value: 50
+    distribution: constant
   freeze_encoder:
-    min: 0
-    max: 1
-    distribution: int_uniform
-early_terminate:
-  type: hyperband
-  min_iter: 10
+    values:
+    - 1
+    - 0
+  lr_encoder:
+    values:
+    - 1e-05
+    - 3e-05
+    - 5e-05
+  lr_encoder_pre:
+    values:
+    - 1e-05
+    - 3e-05
+    - 5e-05
+  lr_others:
+    values:
+    - 1e-05
+    - 3e-05
+    - 5e-05
+  train_data:
+    distribution: constant
+    value: data/pretraining/train_augmented.json
+  weight_decay_encoder:
+    values:
+    - 0.1
+    - 0.05
+    - 0.01
+  weight_decay_other:
+    values:
+    - 0.1
+    - 0.05
+    - 0.01
+  wrapper:
+    distribution: constant
+    value: PretrainedGeneralistModel
+program: main.py
