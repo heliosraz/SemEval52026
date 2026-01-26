@@ -390,6 +390,7 @@ def main(config):
         base_type=base_model,
         base_name=encoder,
         max_length=config.model["max_len"],
+        hidden_sizes=config.model["hidden_sizes"],
         d_attn=config.model["d_attn"],
         drop_attn=config.model["drop_attn"],
         drop_cls=config.model["drop_cls"],

@@ -4,6 +4,8 @@ model:
   encoder: "microsoft/deberta-v3-base" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "PretrainedGeneralistModel"
+  hidden_sizes:
+    - 50
   d_attn: 768
   drop_attn: 0.4
   drop_cls: 0.3

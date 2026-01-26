@@ -27,7 +27,7 @@ class ClassifierModule(torch.nn.Module):
         hidden_sizes (List[int]): list of hidden layer sizes
     """
 
-    def __init__(self, input_len=1, output_len=5, hidden_sizes=[]):
+    def __init__(self, input_len=1, output_len=5, dropout=0.3, hidden_sizes=[]):
         super().__init__()
         if hidden_sizes:
             layers = [torch.nn.Linear(input_len, hidden_sizes[0])]
@@ -37,6 +37,7 @@ class ClassifierModule(torch.nn.Module):
             self.layers = torch.nn.ModuleList(layers)
         else:
             self.layers = torch.nn.ModuleList([torch.nn.Linear(input_len, output_len)])
+        self.dropout = dropout
 
     def train(self):
         self.training = True
@@ -44,11 +45,11 @@ class ClassifierModule(torch.nn.Module):
     def eval(self):
         self.training = False
 
-    def forward(self, x, drop_p=0.3):
+    def forward(self, x):
         for layer in self.layers[:-1]:
             x = layer(x)
             x = torch.tanh(x)
-            x = torch.dropout(x, drop_p, train=self.training)
+            x = torch.dropout(x, self.dropout, train=self.training)
         return self.layers[-1](x)
 
 
@@ -573,15 +574,17 @@ class ModuleWrapper(torch.nn.Module, ABC):
         self,
         base_type=GeneralistModel,
         base_name="google-bert/bert-base-cased",
+        hidden_sizes=[50],
         max_length=512,
         d_attn=128,
         drop_attn=0.4,
         drop_cls=0.3,
     ):
-        super.__init__()
+        super().__init__()
         self.base_model = base_type(base_name, max_length, d_attn, dropout_p=drop_attn)
-        self.classifier = ClassifierModule(input_len=d_attn, hidden_sizes=[50])
-        self.drop_cls = drop_cls
+        self.classifier = ClassifierModule(
+            input_len=d_attn, hidden_sizes=hidden_sizes, dropout=drop_cls
+        )
 
     def train(self):
         self.base_model.train()
@@ -592,7 +595,7 @@ class ModuleWrapper(torch.nn.Module, ABC):
         self.training = False
 
     @abstractmethod
-    def forward(self):
+    def forward(self, data, select=["full_context", "judged_meaning"], mask=True):
         pass
 
 
@@ -607,21 +610,26 @@ class GeneralistModelScored(ModuleWrapper):
         return y, mask_res
 
 
-class PretrainedGeneralistModel:
-    def __init__(self, d_attn=128, **kwargs):
-        super().__init__(**kwargs)
+class PretrainedGeneralistModel(ModuleWrapper):
+    def __init__(self, d_attn=128, drop_cls=0.3, hidden_sizes=[50], **kwargs):
+        super().__init__(d_attn=d_attn, **kwargs)
         vocab_size = self.base_model.get_vocab_size()
-        self.classifier = ClassifierModule(input_len=d_attn, output_len=vocab_size)
+        self.classifier = ClassifierModule(
+            input_len=d_attn,
+            output_len=vocab_size,
+            hidden_sizes=hidden_sizes,
+            dropout=drop_cls,
+        )
 
-    def forward(self, data, select=["full_context", "judged_meaning"]):
+    def forward(self, data, select=["full_context", "judged_meaning"], mask=True):
         x, mask_res = self.base_model(
-            data, mask=True, select=select
+            data, mask=mask, select=select
         )  # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]
         mask_inds = mask_res["mask_inds"]
         x = x[
             torch.arange(x.shape[0]), mask_inds, :
         ]  # [batch, q_seq, d_attn] -> [16, 1, d_attn]
-        y = self.classifier(x, self.drop_cls)  # [16, 1, d_attn] -> [16, class_out]
+        y = self.classifier(x)  # [16, 1, d_attn] -> [16, class_out]
         return y, mask_res
 
 
