@@ -18,6 +18,7 @@ from transformers import (
     get_cosine_schedule_with_warmup,
     get_constant_schedule_with_warmup,
 )
+import atexit
 
 """
 To run script:
@@ -110,6 +111,7 @@ loss_key = {
 class Trainer:
     def __init__(
         self,
+        name,
         model,
         train_set: Dataset,
         dev_set: Dataset,
@@ -124,6 +126,7 @@ class Trainer:
         mask: bool = False,
         k: int = 2,
     ):
+        self.model_name = "{}_{}".format(name, model.base_name.split("/")[-1])
         self.model = model
         self.train_set = train_set
         self.dev_set = dev_set
@@ -138,6 +141,8 @@ class Trainer:
         self.compute_metric = metric
         self.mask = mask
         self.k = k
+        self.top_k = []
+        atexit.register(self.termination_save)
 
     def one_step(self, batch):
         X_batch = batch
@@ -165,11 +170,6 @@ class Trainer:
         delta=1e-5,
         patience=10,
     ):
-        from datetime import datetime
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_name = "{}_{}".format(self.model.base_name.split("/")[-1], timestamp)
-        top_k = []
         # self.train_set = Subset(self.train_set, range(10))
         train_loader = DataLoader(
             self.train_set,
@@ -184,15 +184,17 @@ class Trainer:
 
         best_vloss = 1_000_000.0
         for epoch in tqdm(range(n_epochs), desc="Epochs:", position=0):
-            if epoch in self.freeze_schedule:
+            if str(epoch) in self.freeze_schedule:
                 # Freeze
-                for layer in self.freeze_schedule[epoch]["freeze"]:
-                    for param in layer.parameters():
-                        param.require_grad = False
+                for layer in self.freeze_schedule[str(epoch)]["freeze"]:
+                    for name, param in self.model.named_parameters():
+                        if layer in name:
+                           param.requires_grad = False
                 # Unfreeze
-                for layer in self.freeze_schedule[epoch]["unfreeze"]:
-                    for param in layer.parameters():
-                        param.require_grad = True
+                for layer in self.freeze_schedule[str(epoch)]["unfreeze"]:
+                    for name, param in self.model.named_parameters():
+                        if layer in name:
+                           param.requires_grad = True
             running_tacc = 0
             running_loss = 0.0
             self.model.train()
@@ -236,11 +238,12 @@ class Trainer:
 
             # Track best performance, and save the model's state
             if avg_vloss < best_vloss:
+                print("Logging model...")
                 best_vloss = avg_vloss
-                state_dict = self.get_state_dict(self.model)
-                top_k.append(state_dict)
-                if len(top_k) > self.k:
-                    top_k.pop(0)
+                state_dict = self.get_state_dict()
+                self.top_k.append(state_dict)
+                if len(self.top_k) > self.k:
+                    self.top_k.pop(0)
                 if save_weights_plots:
                     self.plot_linear_weights(
                         [
@@ -256,17 +259,15 @@ class Trainer:
                         running_tacc / len(self.train_set),
                         running_vacc / len(self.dev_set),
                         avg_loss,
-                        avg_vloss,
-                        "checkpoint/{}/{}.png".format(model_name, model_name),
+                        avg_vloss
                     )
             if np.abs(prev_vloss - avg_vloss) <= delta:
                 delta_hits += 1
-                if delta == patience:
+                if delta_hits == patience:
                     break
             if avg_vloss > 20:
                 break
-        model_dir = "checkpoint/{}".format(model_name)
-        self.save_model(top_k, model_dir, model_name)
+        model_dir = self.save_model(self.top_k)
         return model_dir
 
     def plot_linear_weights(
@@ -331,13 +332,22 @@ class Trainer:
         }
         return state_dict
 
-    def save_model(self, stat_dicts, model_dir="./checkpoint", model_name="model"):
+    def save_model(self, stat_dicts):
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_dir = "checkpoint/{}/{}".format(self.model_name, timestamp)
         os.makedirs(model_dir, exist_ok=True)
         for i, state_dict in enumerate(stat_dicts):
             model_fp = os.path.join(
-                model_dir, "{}_{}.safetensors".format(model_name, i)
+                model_dir, "{}_{}.safetensors".format(self.model_name, i)
             )
             save_file(state_dict, model_fp)
+            print("Model saved at {}".format(model_fp))
+        return model_dir
+
+    def termination_save(self):
+        print("Training Terminated: saving models...")
+        self.save_model(self.top_k)
 
 
 def get_lr_scheduler(optim, total_steps, **kwargs):
@@ -455,6 +465,7 @@ def main(config):
 
     # Model Training and Eval
     trainer = Trainer(
+        config.model["name"],
         model,
         train_set,
         dev_set,

@@ -1,27 +1,28 @@
 model:
   # Model Configuration
-  name: "DefX-bert"
-  encoder: "google-bert/bert-base-cased" # Hugging Face model
+  name: "DXA"
+  encoder: "distilbert/distilbert-base-cased" # Hugging Face model
   architecture: "GeneralistModel"
-  wrapper: "GeneralistModelScored"
+  wrapper: "PretrainedGeneralistModel"
+  hidden_sizes:
+    - 50
   d_attn: 768
   drop_attn: 0.4
   drop_cls: 0.3
   fine_tune: false
   max_len: 512
-  max_neg_type_ratio: 1
 
 
 data:
   # Directory Paths
   root_dir: "none"
-  train_data: "data/pretraining/train_augmented.json"
-  val_data: "data/pretraining/dev_augmented.json"
+  train_data: "data/train_augmented.json"
+  val_data: "data/dev_augmented.json"
   input_tags:
     - "source"
     - "target"
-  label_tag: "probs"
-  metric_tag: "range"
+  label_tag: "mask"
+  metric_tag: "mask"
 
 
 training:
@@ -35,7 +36,7 @@ training:
   scheduler_type: "cosine"  # Options: linear, cosine, constant
   
   # Loss Function Configuration
-  loss_type: "KLDivLoss"
+  loss_type: "CrossEntropyLoss"
   loss_betas:
     - 0.7
     - 0.999
@@ -62,3 +63,4 @@ training:
       freeze:
         - classifier
       unfreeze: []
+

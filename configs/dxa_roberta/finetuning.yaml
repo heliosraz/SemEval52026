@@ -1,16 +1,15 @@
 model:
   # Model Configuration
-  name: "DefX-distilbert"
-  encoder: "distilbert/distilbert-base-cased" # Hugging Face model
+  name: "DefX-bert"
+  encoder: "FacebookAI/roberta-base" # Hugging Face model
   architecture: "GeneralistModel"
-  wrapper: "PretrainedGeneralistModel"
-  hidden_sizes:
-    - 50
+  wrapper: "GeneralistModelScored"
   d_attn: 768
   drop_attn: 0.4
   drop_cls: 0.3
   fine_tune: false
   max_len: 512
+  max_neg_type_ratio: 1
 
 
 data:
@@ -21,13 +20,13 @@ data:
   input_tags:
     - "source"
     - "target"
-  label_tag: "mask"
-  metric_tag: "mask"
+  label_tag: "probs"
+  metric_tag: "range"
 
 
 training:
   # Pretrained Model Path
-  prev_path: null  # Use null for training from scratch, or path/repo for fine-tuning
+  prev_path: "checkpoint/bert-base-cased_20260126_220828/bert-base-cased_20260126_220828_2.safetensors"  # Use null for training from scratch, or path/repo for fine-tuning
   
   # Training Parameters
   train_batch_size: 64
@@ -36,7 +35,7 @@ training:
   scheduler_type: "cosine"  # Options: linear, cosine, constant
   
   # Loss Function Configuration
-  loss_type: "CrossEntropyLoss"
+  loss_type: "KLDivLoss"
   loss_betas:
     - 0.7
     - 0.999
@@ -61,6 +60,15 @@ training:
   freeze_components:
     0:
       freeze:
-        - classifier
+        - base_model
       unfreeze: []
-
+    1:
+      freeze: []
+      unfreeze:
+        - K
+        - V
+        - Q
+    2:
+      freeze: []
+      unfreeze:
+        - encoder

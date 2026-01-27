@@ -48,7 +48,7 @@ class ClassifierModule(torch.nn.Module):
     def forward(self, x):
         for layer in self.layers[:-1]:
             x = layer(x)
-            x = torch.tanh(x)
+            x = torch.relu(x)
             x = torch.dropout(x, self.dropout, train=self.training)
         return self.layers[-1](x)
 
@@ -429,8 +429,6 @@ class GeneralistModel(torch.nn.Module):
         super().__init__()
         self.name = model_name
         self.model = ContextEmbedModule(model_name=model_name, max_length=max_length)
-        for param in self.model.parameters():
-            param.requires_grad = False
         self.max_length = max_length
         n = self.model.get_embedding_size()
         self.K = torch.nn.Linear(n, d_attn, bias=False)
@@ -589,10 +587,12 @@ class ModuleWrapper(torch.nn.Module, ABC):
 
     def train(self):
         self.base_model.train()
+        self.classifier.train()
         self.training = True
 
     def eval(self):
         self.base_model.eval()
+        self.classifier.eval()
         self.training = False
 
     @abstractmethod
