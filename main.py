@@ -172,13 +172,13 @@ class Trainer:
             self.model.base_name.split("/")[-1], timestamp, epoch
         )
         top_k = []
-        self.train_set = Subset(self.train_set, range(10))
+        # self.train_set = Subset(self.train_set, range(10))
         train_loader = DataLoader(
             self.train_set,
             batch_size=batch_size,
             shuffle=True,
         )
-        self.dev_set = Subset(self.dev_set, range(10))
+        # self.dev_set = Subset(self.dev_set, range(10))
         dev_loader = DataLoader(self.dev_set, batch_size=batch_size, shuffle=False)
 
         delta_hits = 0
