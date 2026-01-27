@@ -153,7 +153,7 @@ class Trainer:
         elif isinstance(self.loss_fn, torch.nn.KLDivLoss):
             y_pred = torch.log_softmax(y_pred, dim=1)
         loss = self.loss_fn(y_pred, y_labels.to(device))
-        metric = self.compute_metric(y_labels, y_pred)
+        metric = self.compute_metric(y_labels, torch.argmax(y_pred, dim=1))
         return loss, metric
 
     def run(
@@ -162,18 +162,27 @@ class Trainer:
         n_epochs: int = 100,
         batch_size=64,
         save_weights_plots: bool = True,
+        delta=1e-5,
+        patience=10,
     ):
         from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_name = "{}_{}_{}".format(
+            self.model.base_name.split("/")[-1], timestamp, epoch
+        )
         top_k = []
-        # train_set = Subset(train_set, range(10))
+        self.train_set = Subset(self.train_set, range(10))
         train_loader = DataLoader(
             self.train_set,
             batch_size=batch_size,
             shuffle=True,
         )
+        self.dev_set = Subset(self.dev_set, range(10))
         dev_loader = DataLoader(self.dev_set, batch_size=batch_size, shuffle=False)
+
+        delta_hits = 0
+        prev_vloss = 1_000_000.0
 
         best_vloss = 1_000_000.0
         for epoch in tqdm(range(n_epochs), desc="Epochs:", position=0):
@@ -229,13 +238,7 @@ class Trainer:
 
             # Track best performance, and save the model's state
             if avg_vloss < best_vloss:
-
                 best_vloss = avg_vloss
-                model_name = "{}_{}_{}".format(
-                    self.model.name.split("/")[-1], timestamp, epoch
-                )
-                model_dir = "checkpoint/{}".format(model_name)
-                os.makedirs(model_dir, exist_ok=True)
                 state_dict = self.get_state_dict(self.model)
                 top_k.append(state_dict)
                 if len(top_k) > self.k:
@@ -258,8 +261,13 @@ class Trainer:
                         avg_vloss,
                         "checkpoint/{}/{}.png".format(model_name, model_name),
                     )
+            if np.abs(prev_vloss - avg_vloss) <= delta:
+                delta_hits += 1
+                if delta == patience:
+                    break
             if avg_vloss > 20:
                 break
+        model_dir = "checkpoint/{}".format(model_name)
         self.save_model(top_k, model_dir, model_name)
         return model_dir
 
@@ -326,6 +334,7 @@ class Trainer:
         return state_dict
 
     def save_model(self, stat_dicts, model_dir="./checkpoint", model_name="model"):
+        os.makedirs(model_dir, exist_ok=True)
         model_fpath = os.path.join(
             model_dir, "{}.safetensors".format(model_name, model_name)
         )

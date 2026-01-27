@@ -581,6 +581,7 @@ class ModuleWrapper(torch.nn.Module, ABC):
         drop_cls=0.3,
     ):
         super().__init__()
+        self.base_name = base_name
         self.base_model = base_type(base_name, max_length, d_attn, dropout_p=drop_attn)
         self.classifier = ClassifierModule(
             input_len=d_attn, hidden_sizes=hidden_sizes, dropout=drop_cls
