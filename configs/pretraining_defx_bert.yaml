@@ -4,12 +4,13 @@ model:
   encoder: "google-bert/bert-base-cased" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "PretrainedGeneralistModel"
+  hidden_sizes:
+    - 50
   d_attn: 768
   drop_attn: 0.4
   drop_cls: 0.3
   fine_tune: false
   max_len: 512
-  max_neg_type_ratio: 1
 
 
 data:
@@ -62,3 +63,4 @@ training:
       freeze:
         - classifier
       unfreeze: []
+
