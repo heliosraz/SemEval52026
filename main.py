@@ -168,9 +168,7 @@ class Trainer:
         from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_name = "{}_{}_{}".format(
-            self.model.base_name.split("/")[-1], timestamp, epoch
-        )
+        model_name = "{}_{}".format(self.model.base_name.split("/")[-1], timestamp)
         top_k = []
         # self.train_set = Subset(self.train_set, range(10))
         train_loader = DataLoader(
@@ -325,7 +323,7 @@ class Trainer:
         print(f"Figure saved to wandb")
         plt.close("all")
 
-    def get_state_dict(self, model):
+    def get_state_dict(self):
         state_dict = {
             name: param
             for name, param in self.model.named_parameters()
@@ -335,11 +333,11 @@ class Trainer:
 
     def save_model(self, stat_dicts, model_dir="./checkpoint", model_name="model"):
         os.makedirs(model_dir, exist_ok=True)
-        model_fpath = os.path.join(
-            model_dir, "{}.safetensors".format(model_name, model_name)
-        )
-        for state_dict in stat_dicts:
-            save_file(state_dict, model_fpath)
+        for i, state_dict in enumerate(stat_dicts):
+            model_fp = os.path.join(
+                model_dir, "{}_{}.safetensors".format(model_name, i)
+            )
+            save_file(state_dict, model_fp)
 
 
 def get_lr_scheduler(optim, total_steps, **kwargs):
