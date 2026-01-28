@@ -179,12 +179,28 @@ class SentenceEmbedModule(torch.nn.Module):
         model_name (str): name of SBert-like model (e.g. sentencetransformers/all-MiniLM-L6-v2')
     """
 
-    def __init__(self, model_name="sentencetransformers/all-MiniLM-L6-v2"):
+    def __init__(
+        self, model_name="sentencetransformers/all-MiniLM-L6-v2", max_length=512
+    ):
         super().__init__()
         self.sbert_model = SentenceTransformer(model_name, device=device)
+        self.transformer = self.sbert_model[0]
+        self.pooling = self.sbert_model[1]
+        self.tokenizer = self.sbert_model.tokenizer
+        self.max_length = max_length
 
     def forward(self, data):
-        embeds = self.sbert_model.encode(data, convert_to_tensor=True).to(device)
+        toks = self.tokenizer(
+            data, padding="max_length", max_length=self.max_length, return_tensors="pt"
+        ).to(device)
+        # Get token embeddings
+        output = self.transformer(toks)
+
+        pooled_output = self.pooling(output)
+        embeds = pooled_output["sentence_embedding"]  # Shape: (batch, hidden_dim)
+        # embeds = (
+        #     self.sbert_model.encode(data, convert_to_tensor=True).to(device).clone()
+        # )
         return embeds
 
 

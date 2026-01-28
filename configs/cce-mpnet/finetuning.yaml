@@ -7,7 +7,7 @@ model:
   wrapper: ~
   d_attn: ~
   drop_attn: ~
-  drop_cls: ~
+  drop_cls: 0.3
   fine_tune: False
   max_len: 512
 
@@ -40,7 +40,7 @@ training:
   loss_betas:
     - 0.7
     - 0.999
-  loss_reduction: "mean"
+  loss_reduction: "batchmean"
   masking: 0
   
   # Learning Rate and Weight Decay
