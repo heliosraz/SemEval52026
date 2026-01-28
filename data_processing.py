@@ -101,7 +101,7 @@ def read_yaml_file(file_path):
 
 if __name__ == "__main__":
     root = os.path.join(".", "data")
-    for f_name in ["train.json", "dev.json"]:
-        # add_context(os.path.join(root, f_name))
-        augment_data(os.path.join(root, f_name))
+    for f_name in ["test.json"]:
+        add_context(os.path.join(root, f_name))
+        # augment_data(os.path.join(root, f_name))
 #

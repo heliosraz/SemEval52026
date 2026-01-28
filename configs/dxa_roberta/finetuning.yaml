@@ -4,12 +4,13 @@ model:
   encoder: "FacebookAI/roberta-base" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "GeneralistModelScored"
+  hidden_sizes:
+    - 50
   d_attn: 768
   drop_attn: 0.4
   drop_cls: 0.3
   fine_tune: false
   max_len: 512
-  max_neg_type_ratio: 1
 
 
 data:
@@ -21,12 +22,13 @@ data:
     - "source"
     - "target"
   label_tag: "probs"
-  metric_tag: "range"
+  metric_tag: "interval"
 
 
 training:
   # Pretrained Model Path
-  prev_path: "checkpoint/bert-base-cased_20260126_220828/bert-base-cased_20260126_220828_2.safetensors"  # Use null for training from scratch, or path/repo for fine-tuning
+  prev_path: "checkpoint/DXA_roberta-base"  # Use null for training from scratch, or path/repo for fine-tuning
+  task: "classifier-ft"
   
   # Training Parameters
   train_batch_size: 64

@@ -1,0 +1,33 @@
+model:
+  # Model Configuration
+  name: "DefX-bert"
+  encoder: "google-bert/bert-base-cased" # Hugging Face model
+  architecture: "GeneralistModel"
+  wrapper: "GeneralistModelScored"
+  d_attn: 768
+  drop_attn: 0.4
+  drop_cls: 0.3
+  fine_tune: false
+  max_len: 512
+
+
+data:
+  # Directory Paths
+  data: "data/test.json"
+  output: "output/"
+  input_tags:
+    - "context"
+    - "judged_meaning"
+  label_tag: "average"
+
+
+evaluation:
+  # Pretrained Model Path and Task
+  prev_path: "checkpoint/DXA_bert-base-cased/"
+  task: "eval"
+  
+  # Training Parameters
+  train_batch_size: 64
+  epochs: 100
+  warmup_ratio: 0.05
+  scheduler_type: "cosine"  # Options: linear, cosine, constant

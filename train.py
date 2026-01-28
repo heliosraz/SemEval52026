@@ -1,8 +1,9 @@
 from data_processing import load_data, read_yaml_file
 import torch
 from tqdm import tqdm
-from sys import argv, exit
+from sys import argv
 from torch.utils.data import DataLoader, Dataset, Subset
+from data_structs import WordSenseData, AugWordSenseData
 import pandas as pd
 from safetensors.torch import save_file, load_model
 import os
@@ -10,7 +11,6 @@ import models
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
-import json
 from typing import List, Dict, Tuple, Any
 import wandb
 import metrics
@@ -39,59 +39,13 @@ else:
     tensor_parallel = False
 
 
-class WordSenseData(Dataset):
-    def __init__(self, df: pd.DataFrame):
-        self.data = df
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return {
-            "average": self.data.loc[idx, "average"],
-            "stdev": self.data.loc[idx, "stdev"],
-            "index": self.data.loc[idx, "index"],
-            "homonym": self.data.loc[idx, "homonym"],
-            "source": self.data.loc[idx, "context"],
-            "target": self.data.loc[idx, "judged_meaning"],
-        }
-
-
-class AugWordSenseData(Dataset):
-    def __init__(self, df: pd.DataFrame):
-        self.data = df
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return {col: self.data.loc[idx, col] for col in self.data.columns.tolist()}
-
-
-class CrossAttentionData(Dataset):
-    def __init__(self, data: pd.DataFrame):
-        self.data = data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return {
-            "average": self.data.loc[idx, "average"],
-            "stdev": self.data.loc[idx, "stdev"],
-            "candidate": self.data.loc[idx, "candidate"],
-            "full_context": self.data.loc[idx, "full_context"],
-        }
-
-
 os.makedirs("checkpoint", exist_ok=True)
 os.environ["TOKENIZERS_PARALLELISM"] = "False"
 
 task_dataset = {
-    "data": WordSenseData,
-    "classifier": CrossAttentionData,
-    "finetuning": CrossAttentionData,
-    "pretraining": AugWordSenseData,
+    "eval": WordSenseData,
+    "classifier-ft": AugWordSenseData,
+    "pretrain": AugWordSenseData,
 }
 model_key = {
     "GeneralistModel_nosep": models.GeneralistModel_nosep,
@@ -189,12 +143,12 @@ class Trainer:
                 for layer in self.freeze_schedule[str(epoch)]["freeze"]:
                     for name, param in self.model.named_parameters():
                         if layer in name:
-                           param.requires_grad = False
+                            param.requires_grad = False
                 # Unfreeze
                 for layer in self.freeze_schedule[str(epoch)]["unfreeze"]:
                     for name, param in self.model.named_parameters():
                         if layer in name:
-                           param.requires_grad = True
+                            param.requires_grad = True
             running_tacc = 0
             running_loss = 0.0
             self.model.train()
@@ -259,7 +213,7 @@ class Trainer:
                         running_tacc / len(self.train_set),
                         running_vacc / len(self.dev_set),
                         avg_loss,
-                        avg_vloss
+                        avg_vloss,
                     )
             if np.abs(prev_vloss - avg_vloss) <= delta:
                 delta_hits += 1
@@ -334,6 +288,7 @@ class Trainer:
 
     def save_model(self, stat_dicts):
         from datetime import datetime
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_dir = "checkpoint/{}/{}".format(self.model_name, timestamp)
         os.makedirs(model_dir, exist_ok=True)
@@ -374,26 +329,9 @@ def get_loss_fn(**kwargs):
     return loss_key[loss_type](reduction=loss_reduction)
 
 
-def eval(model, data: pd.DataFrame):
-    loader = DataLoader(
-        data,
-        batch_size=64,
-    )
-    res = pd.DataFrame(columns=["id", "prediction"])
-    with torch.no_grad():
-        for batch in loader:
-            pred = torch.argmax(model(batch), dim=1) + 1
-            y = pd.DataFrame(pred.cpu(), columns=["prediction"])
-            y["id"] = batch["index"]
-            res = pd.concat([res, y])
-    res["id"] = res["id"].astype("str")
-    res["prediction"] = res["prediction"].astype("int")
-    return res
-
-
 def main(config):
     ## Data Processing
-    task = "pretraining"
+    task = config.training["task"]
     train_df = load_data(config.data["train_data"])
     dev_df = load_data(config.data["val_data"])
     train_set = task_dataset[task](train_df)

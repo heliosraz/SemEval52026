@@ -168,9 +168,7 @@ class ContextOffsetModule(torch.nn.Module):
         outputs = {}
         res_tensors = {}
         for param in select:
-            outputs[param], batch_offsets = self.embed(
-                list(data[param]), include_offsets=True
-            )
+            outputs[param], batch_offsets = self.embed(list(data[param]), offset=True)
             # get list of target offsets for each data instance for both full_context and example
             offsets[param] = self.embed.get_offsets(data, param, batch_offsets)
             res_tensors[param] = outputs[param][
@@ -196,6 +194,39 @@ class SentenceEmbedModule(torch.nn.Module):
 
 
 ########### Main Modules
+
+
+class BaselineModule(torch.nn.Module):
+    """Baseline module that multiplies similarity scores by 5
+    Args:
+        model_name (str): Bert/Sbert-like model name
+    """
+
+    def __init__(
+        self,
+        model_name="google-bert/bert-base-cased",
+        **kwargs,
+    ):
+        super().__init__()
+        self.model = ContextEmbedModule(model_name).to(device)
+        self.sim = torch.nn.CosineSimilarity()
+
+    def forward(self, data, select=["full_context", "example_sentence"]):
+        offsets = {}
+        outputs = {}
+        res_tensors = {}
+        for param in select:
+            outputs[param], batch_offsets = self.model(list(data[param]), offset=True)
+            # get list of target offsets for each data instance for both full_context and example
+            offsets[param] = self.model.get_offsets(data, param, batch_offsets)
+            res_tensors[param] = outputs[param][
+                torch.arange(0, outputs[param].shape[0]), offsets[param], :
+            ]
+        x = self.sim(res_tensors[select[0]], res_tensors[select[1]])
+        y = 5 * x
+        return y.long()
+
+
 class Sentence_SimModule(torch.nn.Module):
     """Similarity module using SentenceTransformers for entire sentence embedding instead of just target word
 
@@ -209,12 +240,12 @@ class Sentence_SimModule(torch.nn.Module):
         self.device = device
         self.sbert_model = SentenceTransformer(model_name, device=self.device)
 
-    def forward(self, data: Dict):
+    def forward(self, data: Dict, select=["full_context", "example_sentence"]):
         context_embeds = self.sbert_model.encode(
-            list(data["full_context"]), convert_to_tensor=True
+            list(data[select[0]]), convert_to_tensor=True
         ).to(self.device)
         example_embeds = self.sbert_model.encode(
-            list(data["example_sentence"]), convert_to_tensor=True
+            list(data[select[1]]), convert_to_tensor=True
         ).to(self.device)
         # 'similarity_pairwise' bc otherwise it's every full_context with every example
         sim = self.sbert_model.similarity_pairwise(context_embeds, example_embeds).to(
@@ -231,7 +262,10 @@ class SimilarityScoreModule(torch.nn.Module):
     """
 
     def __init__(
-        self, model_name="google-bert/bert-base-cased", use_sbert: bool = False
+        self,
+        model_name="google-bert/bert-base-cased",
+        use_sbert: bool = False,
+        **kwargs,
     ):
         self.use_sbert = use_sbert
         super().__init__()
@@ -257,7 +291,7 @@ class SimilarityScoreModule(torch.nn.Module):
         return y.transpose(1, 2).squeeze(-1)
 
 
-class CrossContentSimilarityModule(torch.nn.Module):
+class CrossContextSimilarityModule(torch.nn.Module):
     """Compares a sentence embedding of the candidate sentence with all contextual embeddings of the full_context excerpt.
 
     Args:

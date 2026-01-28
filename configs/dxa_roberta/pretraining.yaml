@@ -28,6 +28,7 @@ data:
 training:
   # Pretrained Model Path
   prev_path: null  # Use null for training from scratch, or path/repo for fine-tuning
+  task: "pretrain"
   
   # Training Parameters
   train_batch_size: 64
