@@ -6,6 +6,7 @@ from bisect import bisect
 from typing import List, Dict
 import sys
 import math
+from nltk.corpus import wordnet as wn
 from random import randint
 from abc import ABC, abstractmethod
 
@@ -114,7 +115,7 @@ class ContextEmbedModule(torch.nn.Module):
         # for each masking index generate a pseudo-mask
         # or gather the true token id and mask
         for i, replace_ind in enumerate(mask_res["mask_inds"]):
-            if replace_ind < 0:
+            if replace_ind < 0 or replace_ind >= len(tokens["input_ids"][i]):
                 replace_ind = randint(0, len(instances["input_ids"][i]) - 1)
                 mask_res["mask_inds"][i] = replace_ind
                 true_token = instances["input_ids"][i][replace_ind]
@@ -487,10 +488,10 @@ class GeneralistModel(torch.nn.Module):
 
         self.drop_attn = dropout_p
 
-    def train(self):
+    def train(self, mode="train"):
         self.training = True
 
-    def eval(self):
+    def eval(self, mode="eval"):
         self.training = False
 
     def get_vocab_size(self):
@@ -668,6 +669,155 @@ class PretrainedGeneralistModel(ModuleWrapper):
             torch.arange(x.shape[0]), mask_inds, :
         ]  # [batch, q_seq, d_attn] -> [16, 1, d_attn]
         y = self.classifier(x)  # [16, 1, d_attn] -> [16, class_out]
+        return y, mask_res
+
+class SynonymModel(GeneralistModel):
+    """GLiNER-based model, using WordNet senses
+    as the equivalent of entity tokens. Otherwise,
+    identical to the GeneralistModel implementation of GLiNER
+    """
+    
+    def __init__(self,
+                 model_name: str = "google-bert/bert-base-cased",
+                 max_length: int = 512,
+                 d_attn: int = 128,
+                 n_syns: int = 2,
+                 dropout_p: float = 0.4,
+                 drop_cls: float = 0.4,):
+        super().__init__(model_name, max_length, d_attn, dropout_p)
+        self.name = model_name
+
+        self.drop_cls = drop_cls
+
+        self.n_syns = n_syns
+        self.syn_length = n_syns * 2 + 2
+        self.ctx_length = max_length - self.syn_length 
+        self.max_length =  self.syn_length + self.ctx_length + 3  # syns | sep | ctx | wd: 
+
+        self.model = ContextEmbedModule(model_name, self.max_length)
+        n = self.model.get_embedding_size()
+
+        
+        self.K = torch.nn.Linear(n, d_attn, bias=False)
+        self.Q = torch.nn.Linear(n, d_attn, bias=False)
+        self.V = torch.nn.Linear(n, d_attn, bias=False)
+        torch.nn.init.xavier_normal_(self.K.weight)
+        torch.nn.init.xavier_normal_(self.Q.weight)
+        torch.nn.init.xavier_normal_(self.V.weight)
+        self.train_mode = False
+        self.drop_attn = dropout_p
+
+    def forward(self, data: Dict, select=["full_context", "homonym"], mask=False):
+        """largely borrowed from GeneralistModule, w/ minor changes to account for change
+        in model
+        """
+        data["sep"] = [self.model.tokenizer.sep_token]*len(data[select[1]])
+
+        sep_toks = self.model.tokenizer(data["sep"], return_tensors = "pt",
+                                        padding=False).to(device)
+        sep_toks["attention_mask"] = torch.zeros(sep_toks["attention_mask"].shape).to(device)
+        sep_size = len(sep_toks["input_ids"][0])
+
+        synonyms = list(map(self.wordnet_synonyms, data[select[1]]))
+        
+        syn_toks = self.model.tokenizer(synonyms,
+                                        return_tensors="pt",
+                                        padding="max_length",
+                                        max_length=self.syn_length,
+                                        truncation=True).to(device)
+
+        context_toks = self.model.tokenizer(data[select[0]],
+                                            return_tensors="pt",padding="max_length",
+                                            truncation=True,
+                                            max_length=self.ctx_length - sep_size - 3).to(device)
+        word_toks = self.model.tokenizer(data[select[1]],
+                                         return_tensors="pt",
+                                         padding="max_length",
+                                         max_length=3,
+                                         truncation=True).to(device) 
+
+        if mask:
+            syn_toks, masks = self.model.mask(synonyms, syn_toks)
+
+        input_seq = {"input_ids": torch.concat([syn_toks["input_ids"],
+                                                sep_toks["input_ids"],
+                                                context_toks["input_ids"],
+                                                word_toks["input_ids"]], axis=1),
+                     "attention_mask": torch.concat([syn_toks["attention_mask"],
+                                                    sep_toks["attention_mask"],
+                                                    context_toks["attention_mask"],
+                                                    word_toks["attention_mask"]],axis=1)}
+
+        
+        
+        input_embeds = self.model(
+                                input_seq,
+                                tokenize = False)
+        sep_inds = [(len(candi), len(candi)+len(sep)) 
+                    for candi, sep in zip(
+                        syn_toks["input_ids"],
+                        sep_toks["input_ids"])]
+
+        synonym_embeds = []
+        context_embeds = []
+        for i in range(input_embeds.shape[0]):
+            start, end = sep_inds[i]
+            synonym_embeds.append(input_embeds[i, :start, :])
+            context_embeds.append(input_embeds[i, end:, :])
+        context_embeds = torch.stack(context_embeds)
+        synonym_embeds = torch.stack(synonym_embeds)
+
+        #TODO post-refiner attn layers
+        refined_ctx = self.K(context_embeds)
+        refined_syns = self.Q(synonym_embeds)
+        aggre_value = self.V(context_embeds)
+        #TODO attn mask
+        attn_mask = []
+
+        x = self.scaled_dot_product_attention(refined_syns,
+                                              refined_ctx,
+                                              aggre_value,
+                                              attn_mask=attn_mask,
+                                              dropout_p=self.drop_attn)
+        return x, masks
+
+    
+    def wordnet_synonyms(self, w: str) -> str:
+        """TODO docstring"""
+        syns = wn.synonyms(w)
+        pairs = list(zip(["[SNS] " ] * len(syns), set(f"{wd[0]}" for wd in syns if wd)))[:self.n_syns]
+        pairs.append(("[SNS] ", "[MISC]"))
+        return "".join("".join(p) for p in pairs)
+
+
+class PretrainedSynonymModel(PretrainedGeneralistModel):
+    def __init__(self, 
+        base_type = SynonymModel,
+        base_name = "google-bert/bert-base-cased",
+        max_length = 512,
+        d_attn = 128,
+        hidden_sizes = [50],
+        drop_attn = 0.4,
+        drop_cls = 0.4):
+        super().__init__()
+        self.name = base_name
+        self.base_model = base_type(base_name, max_length, d_attn, dropout_p = drop_attn)
+        vocab_size = self.base_model.get_vocab_size()
+        self.classifier = ClassifierModule(
+            input_len = d_attn,
+            output_len = vocab_size)
+        self.train_mode = False
+        self.drop_cls = drop_cls
+
+
+    def forward(self, data: Dict, select=["full_context", "homonym"], mask=True):
+        x, mask_res = self.base_model(data, mask = mask, select = select) # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]
+        if mask:
+            mask_inds = mask_res["mask_inds"]
+            x = x[torch.arange(x.shape[0]), mask_inds, :] # [batch, q_seq, d_attn] -> [16, 1, d_attn]
+        else:
+            x = x.max(dim = 1)[0].unsqueeze(1)
+        y = self.classifier(x, self.drop_cls) # [16, 1, d_attn] -> [16, class_out]
         return y, mask_res
 
 
