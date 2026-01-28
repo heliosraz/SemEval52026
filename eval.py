@@ -29,6 +29,7 @@ model_key = {
     "GeneralistModel": models.GeneralistModel,
     "PretrainedGeneralistModel": models.PretrainedGeneralistModel,
     "BaselineModule": models.BaselineModule,
+    "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
 }
 metric_key = {
     "mask": metrics.accuracy,
@@ -50,7 +51,7 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
         for batch in tqdm(loader):
             pred = model(batch, select)
             if len(pred.shape) > 1:
-                pred = torch.argmax(model(batch, select), dim=1) + 1
+                pred = torch.argmax(pred, dim=1) + 1
             else:
                 pred = torch.round(pred) + 1
             y = pd.DataFrame(pred.cpu(), columns=["prediction"])
@@ -78,7 +79,9 @@ def main(config):
             drop_cls=config["model"]["drop_cls"],
         ).to(device)
     else:
-        model = base_model(model_name=encoder, max_length=config["model"]["max_len"])
+        model = base_model(
+            model_name=encoder, max_length=config["model"]["max_len"]
+        ).to(device)
     if not config["model"]["huggingface"]:
         load_model(model, config["evaluation"]["prev_path"])
 

@@ -46,15 +46,19 @@ task_dataset = {
     "eval": WordSenseData,
     "classifier-ft": AugWordSenseData,
     "pretrain": AugWordSenseData,
+    "encoder-ft": AugWordSenseData,
 }
 model_key = {
     "GeneralistModel_nosep": models.GeneralistModel_nosep,
     "GeneralistModel": models.GeneralistModel,
     "PretrainedGeneralistModel": models.PretrainedGeneralistModel,
+    "BaselineModule": models.BaselineModule,
+    "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
 }
 metric_key = {
     "mask": metrics.accuracy,
     "average": metrics.range,
+    "interval": metrics.range,
 }
 loss_key = {
     "CrossEntropyLoss": torch.nn.CrossEntropyLoss,
@@ -80,7 +84,7 @@ class Trainer:
         mask: bool = False,
         k: int = 2,
     ):
-        self.model_name = "{}_{}".format(name, model.base_name.split("/")[-1])
+        self.model_name = name
         self.model = model
         self.train_set = train_set
         self.dev_set = dev_set
@@ -339,17 +343,24 @@ def main(config):
 
     ## Model Initialization
     base_model = model_key[config.model["architecture"]]
-    wrapper = model_key[config.model["wrapper"]]
     encoder = config.model["encoder"]
-    model = wrapper(
-        base_type=base_model,
-        base_name=encoder,
-        max_length=config.model["max_len"],
-        hidden_sizes=config.model["hidden_sizes"],
-        d_attn=config.model["d_attn"],
-        drop_attn=config.model["drop_attn"],
-        drop_cls=config.model["drop_cls"],
-    ).to(device)
+    if config["model"]["wrapper"]:
+        wrapper = model_key[config["model"]["wrapper"]]
+        model = wrapper(
+            base_type=base_model,
+            base_name=encoder,
+            max_length=config["model"]["max_len"],
+            hidden_sizes=config["model"]["hidden_sizes"],
+            d_attn=config["model"]["d_attn"],
+            drop_attn=config["model"]["drop_attn"],
+            drop_cls=config["model"]["drop_cls"],
+        ).to(device)
+    else:
+        model = base_model(
+            model_name=encoder,
+            max_length=config["model"]["max_len"],
+            drop_cls=config["model"]["drop_cls"],
+        ).to(device)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
 
@@ -360,22 +371,22 @@ def main(config):
         "lr": config.training["lr_others"],
         "weight_decay": config.training["weight_decay_other"],
     }
+
+    param_groups = {}
+    for group in config.training["param_groups"]:
+        param_groups[group] = []
+        for name, param in model.named_parameters():
+            for layer in config.training["param_groups"][group]:
+                if layer in name:
+                    param_groups[group].append(param)
     optim = torch.optim.AdamW(
         [
             {
-                "params": model.base_model.model.parameters(),
-                "lr": config.training["lr_encoder"],
-                "weight_decay": config.training["weight_decay_encoder"],
-            },
-            {
-                "params": [
-                    param
-                    for name, param in model.base_model.named_parameters()
-                    if "K" in name or "Q" in name or "V" in name
-                ],
-                "lr": config.training["lr_attn"],
-                "weight_decay": config.training["weight_decay_encoder"],
-            },
+                "params": param_groups[group],
+                "lr": config.training[f"lr_{group}"],
+                "weight_decay": config.training[f"weight_decay_{group}"],
+            }
+            for group in param_groups
         ],
         **optim_params,
     )
@@ -402,8 +413,9 @@ def main(config):
         )
 
     # Model Training and Eval
+    base_name = encoder.split("/")[-1]
     trainer = Trainer(
-        config.model["name"],
+        "_".join([config.model["name"], base_name]),
         model,
         train_set,
         dev_set,
@@ -414,7 +426,11 @@ def main(config):
         optimizer=optim,
         lr_scheduler=lr_scheduler,
         metric=metric_key[config.data["metric_tag"]],
-        freeze_schedule=config.training["freeze_components"],
+        freeze_schedule=(
+            config.training["freeze_components"]
+            if config.training["freeze_components"]
+            else {}
+        ),
         mask=config.training["masking"],
         k=config.training["save_total_limit"],
     )

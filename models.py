@@ -39,12 +39,6 @@ class ClassifierModule(torch.nn.Module):
             self.layers = torch.nn.ModuleList([torch.nn.Linear(input_len, output_len)])
         self.dropout = dropout
 
-    def train(self):
-        self.training = True
-
-    def eval(self):
-        self.training = False
-
     def forward(self, x):
         for layer in self.layers[:-1]:
             x = layer(x)
@@ -208,7 +202,7 @@ class BaselineModule(torch.nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.model = ContextEmbedModule(model_name).to(device)
+        self.model = ContextEmbedModule(model_name)
         self.sim = torch.nn.CosineSimilarity()
 
     def forward(self, data, select=["full_context", "example_sentence"]):
@@ -300,7 +294,10 @@ class CrossContextSimilarityModule(torch.nn.Module):
     """
 
     def __init__(
-        self, model_name="sentence-transformers/all-MiniLM-L6-v2", max_length=512
+        self,
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        max_length=512,
+        drop_cls=0.3,
     ):
         super().__init__()
         self.max_length = max_length
@@ -309,24 +306,24 @@ class CrossContextSimilarityModule(torch.nn.Module):
         )
         self.sentence_former = SentenceEmbedModule(model_name=model_name)
 
-        for model in [self.context_former, self.sentence_former]:
-            for param in model.parameters():
-                param.requires_grad = False
-
         self.sim = torch.nn.CosineSimilarity(dim=2)
-        self.scorer = ClassifierModule(input_len=max_length, hidden_sizes=[128])
+        self.scorer = ClassifierModule(
+            input_len=max_length, hidden_sizes=[128], dropout=drop_cls
+        )
 
-    def forward(self, data: Dict, select=["full_context", "judged_meaning"]):
+    def forward(self, data: Dict, select=["full_context", "judged_meaning"], **kwargs):
         # full_context gets fed into bert to get contextual embeddings
         content_embed = self.context_former(data[select[0]])
         # example_sentence/definition fed into sbert to get pooled contextual embeddings
-        candidate_embed = self.sentence_former(data[select[1]]).unsqueeze(-1)
+        candidate_embed = self.sentence_former(data[select[1]])
         # get similarity of candidate with each of content_embed
-        # similarities = self.sim(content_embed, candidate_embed)
-        similarities = torch.bmm(content_embed, candidate_embed).transpose(1, 2)
+        # similarities = self.sim(content_embed, candidate_embed.unsqueeze(1)).unsqueeze(
+        #     -1
+        # )
+        similarities = torch.bmm(content_embed, candidate_embed.unsqueeze(-1))
         # feed similarities into scorer
-        y = self.scorer(similarities)
-        return y
+        y = self.scorer(similarities.transpose(1, 2))
+        return y.squeeze(1)
 
 
 class GeneralistModel_nosep(torch.nn.Module):
@@ -618,16 +615,6 @@ class ModuleWrapper(torch.nn.Module, ABC):
         self.classifier = ClassifierModule(
             input_len=d_attn, hidden_sizes=hidden_sizes, dropout=drop_cls
         )
-
-    def train(self):
-        self.base_model.train()
-        self.classifier.train()
-        self.training = True
-
-    def eval(self):
-        self.base_model.eval()
-        self.classifier.eval()
-        self.training = False
 
     @abstractmethod
     def forward(self, data, select=["full_context", "judged_meaning"], mask=True):

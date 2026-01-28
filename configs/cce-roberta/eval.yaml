@@ -24,5 +24,5 @@ data:
 
 evaluation:
   # Pretrained Model Path and Task
-  prev_path: "top_models/all-roberta-large-v1_20260109_124316_91.safetensors"
+  prev_path: "top_models/cce-all-roberta-large-v1.safetensors"
   task: "eval"
