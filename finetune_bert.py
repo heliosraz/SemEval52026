@@ -32,11 +32,13 @@ def range(preds, labels):
 def tokenize_data(data):
     return tokenizer(data['combined'], padding="max_length", truncation=True)
 
-def train(model_name:str, data, out_file:str='out.txt', device="cpu"):
+def train(model_name:str, data, batch_size=8, out_file:str='out.txt', device="cpu", output_dir='bert'):
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=5).to(device)
     training_args = TrainingArguments(
-            output_dir = 'bert',
+            output_dir = output_dir,
             eval_strategy = 'epoch',
+            num_train_epochs = 5,
+            per_device_train_batch_size = batch_size,
             label_names= ['labels']
     )
     loss_func = torch.nn.CrossEntropyLoss()
@@ -49,10 +51,18 @@ def train(model_name:str, data, out_file:str='out.txt', device="cpu"):
         #compute_loss_func = loss_func
     )
     trainer.train()
+    # get final eval
+    evaluated = trainer.evaluate(data['eval'])
+    print(evaluated)
+    with open(out_file, "a") as f:
+        f.write(f"model_name : {model_name}  accuracy: {evaluated["eval_accuracy"]}")
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    batch_size = 4
     model_name = "google-bert/bert-base-cased"
+    out_file = "bert.txt"
+    out_dir = "bert"
     tokenizer = AutoTokenizer.from_pretrained(model_name,num_labels=5)
     data = DatasetDict()
     #TODO: cleaner version of this data collating-note had to change load_data 
@@ -60,6 +70,10 @@ if __name__ == "__main__":
     data['train'] = Dataset.from_pandas(load_data("train.json"))
     data['eval'] = Dataset.from_pandas(load_data("dev.json"))
     tok_data = data.map(tokenize_data, batched=True)
-    print(tok_data['train'][0])
-    train(model_name= model_name, data=tok_data, device=device)
+    # print(tok_data['train'][0])
+    train(model_name= model_name, data=tok_data, batch_size=batch_size, device=device, out_file = out_file, output_dir=out_dir)
+    # mpnet
+    model_name="microsoft/mpnet-base"
+    out_file = "mpnet.txt"
+    out_dir = "mpnet"
 
