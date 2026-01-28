@@ -75,7 +75,10 @@ task_dataset = {
     'finetuning': CrossAttentionData,
     'pretraining':AugWordSenseData
     }
+
 model_key = {
+    'SynonymModule': models.SynonymModule,
+    'PretrainedSynonymModel': models.PretrainedSynonymModel,
     'GeneralistModel_nosep': models.GeneralistModel_nosep,
     'GeneralistModel': models.GeneralistModel,
     'PretrainedGeneralistModel': models.PretrainedGeneralistModel,
@@ -271,153 +274,63 @@ def save_model(
     for state_dict in stat_dicts:
         save_file(state_dict, model_fpath)
 
-if __name__ == "__main__":    
-    run = wandb.init(
-        entity="heliosra-n-a",
-        project="2026set5",
-        settings=wandb.Settings(
-            x_disable_stats=True,
-            console="off",
-            save_code=False,
-            quiet=True,
-        )
-    )
-    config = wandb.config
+if __name__ == "__main__":
+    # run = wandb.init(
+    #     entity="heliosra-n-a",
+    #     project="2026set5",
+    #     settings=wandb.Settings(
+    #         x_disable_stats=True,
+    #         console="off",
+    #         save_code=False,
+    #         quiet=True,
+    #     )
+    # )
+    # config = wandb.config
     
-    task = "pretraining"
-    train_df = load_data(config.train_data)
-    dev_df = load_data(config.dev_data)
-    train_set = task_dataset[task](train_df)
-    dev_set = task_dataset[task](dev_df)
-
-    ## Training parameters
-    base = model_key[config.architecture]
-    wrapper = model_key[config.wrapper]
-    model_name = config.encoder
-    model = wrapper(
-        base=base,
-        model_name=model_name,
-        d_attn=config.d_attn,
-        drop_attn = config.drop_attn,
-        drop_cls = config.drop_cls).to(device)
-    
-    input_tags = ["source", "target"]
-    label_tag = "mask"
-    metric_label = "mask"
-    metric = metric_key[metric_label]
-    
-    loss_fn = torch.nn.CrossEntropyLoss()
-    optim_params = {
-        "betas": (0.7, 0.999),
-        "lr": config.lr_others,
-        "weight_decay": config.weight_decay_other
-        }
-    optim = torch.optim.AdamW([
-        {
-            'params': model.base_model.model.parameters(),
-            'lr': config.lr_encoder_pre,
-            'weight_decay': config.weight_decay_encoder
-            },
-        {
-            'params': [param \
-                for name, param in model.base_model.named_parameters() \
-                    if "K" in name or "Q" in name or "V" in name],
-            'lr': config.lr_encoder,
-            'weight_decay': config.weight_decay_encoder
-            }
-        ],
-        betas=(0.7, 0.999))
-    total_steps = len(train_set)//config.batch_size*config.epochs
-    scheduler = get_cosine_schedule_with_warmup(
-        optim,
-        num_warmup_steps=total_steps*.10,
-        num_training_steps=total_steps*.90
-    )
-    freeze_schedule = {
-        0: ([model.classifier],[])}
-    mask = True
-    
-    # Double checking config feasibility
-    if (type(loss_fn), label_tag) == (torch.nn.CrossEntropyLoss, "probs") or \
-        (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "mask") or \
-            (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "average"):
-        raise TypeError("Loss function and label tag mismatch. \
-                        Please check the training parameters:\n\
-                        type(loss_fun), label_tag = {},{}".format(type(loss_fn), label_tag))
-    
-    # Model Training and Eval
-    model_path = train(
-                    model,
-                    train_set,
-                    dev_set,
-                    input_tags = input_tags,
-                    label_tag = label_tag,
-                    metric_label = metric_label,
-                    loss_fn = loss_fn,
-                    optimizer = optim,
-                    lr_scheduler = scheduler,
-                    metric = metric,
-                    n_epochs = config.epochs,
-                    batch_size = config.batch_size,
-                    freeze_schedule = freeze_schedule,
-                    mask = mask,
-                    )
-    wandb.finish()
-    ################
-    
-        
-    #     ## Data Processing
-    # if len(argv)<3:
-    #     print("No data files were provided.")
-    #     exit(1)
-    # elif len(argv)==3:
-    #     base_model = ""
-    #     train_df = load_data(argv[1])
-    #     dev_df = load_data(argv[2])
-    # else:
-    #     base_model = argv[1]
-    #     train_df = load_data(argv[2])
-    #     dev_df = load_data(argv[3])
     # task = "pretraining"
+    # train_df = load_data(config.train_data)
+    # dev_df = load_data(config.dev_data)
     # train_set = task_dataset[task](train_df)
     # dev_set = task_dataset[task](dev_df)
 
     # ## Training parameters
-    # if base_model:
-    #     model = models.PretrainedGeneralistModel(
-    #         base=models.GeneralistModel,
-    #         model_name=base_model).to(device)
-    # else:
-    #     model = models.PretrainedGeneralistModel(
-    #         base=models.GeneralistModel,).to(device)
+    # base = model_key[config.architecture]
+    # wrapper = model_key[config.wrapper]
+    # model_name = config.encoder
+    # model = wrapper(
+    #     base=base,
+    #     model_name=model_name,
+    #     d_attn=config.d_attn,
+    #     drop_attn = config.drop_attn,
+    #     drop_cls = config.drop_cls).to(device)
+    
     # input_tags = ["source", "target"]
     # label_tag = "mask"
     # metric_label = "mask"
-    # epochs = 10
-    # batch_size = 32
-    # metric = metrics.accuracy
+    # metric = metric_key[metric_label]
+    
     # loss_fn = torch.nn.CrossEntropyLoss()
     # optim_params = {
     #     "betas": (0.7, 0.999),
-    #     "lr": 1e-3,
-    #     "weight_decay": 0.2
+    #     "lr": config.lr_others,
+    #     "weight_decay": config.weight_decay_other
     #     }
     # optim = torch.optim.AdamW([
     #     {
     #         'params': model.base_model.model.parameters(),
-    #         'lr': 1e-3,
-    #         'weight_decay':0.2
+    #         'lr': config.lr_encoder_pre,
+    #         'weight_decay': config.weight_decay_encoder
     #         },
     #     {
     #         'params': [param \
     #             for name, param in model.base_model.named_parameters() \
     #                 if "K" in name or "Q" in name or "V" in name],
-    #         'lr': 1e-3,
-    #         'weight_decay': 0.2
+    #         'lr': config.lr_encoder,
+    #         'weight_decay': config.weight_decay_encoder
     #         }
     #     ],
     #     betas=(0.7, 0.999))
-    # total_steps = len(train_set)//batch_size*epochs
+    # total_steps = len(train_set)//config.batch_size*config.epochs
     # scheduler = get_cosine_schedule_with_warmup(
     #     optim,
     #     num_warmup_steps=total_steps*.10,
@@ -426,6 +339,14 @@ if __name__ == "__main__":
     # freeze_schedule = {
     #     0: ([model.classifier],[])}
     # mask = True
+    
+    # # Double checking config feasibility
+    # if (type(loss_fn), label_tag) == (torch.nn.CrossEntropyLoss, "probs") or \
+    #     (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "mask") or \
+    #         (type(loss_fn), label_tag) == (torch.nn.KLDivLoss, "average"):
+    #     raise TypeError("Loss function and label tag mismatch. \
+    #                     Please check the training parameters:\n\
+    #                     type(loss_fun), label_tag = {},{}".format(type(loss_fn), label_tag))
     
     # # Model Training and Eval
     # model_path = train(
@@ -439,8 +360,90 @@ if __name__ == "__main__":
     #                 optimizer = optim,
     #                 lr_scheduler = scheduler,
     #                 metric = metric,
-    #                 n_epochs = epochs,
-    #                 batch_size = batch_size,
+    #                 n_epochs = config.epochs,
+    #                 batch_size = config.batch_size,
     #                 freeze_schedule = freeze_schedule,
     #                 mask = mask,
     #                 )
+    # wandb.finish()
+    ################
+    
+        
+    #     ## Data Processing
+    if len(argv)<3:
+        print("No data files were provided.")
+        exit(1)
+    elif len(argv)==3:
+        base_model = ""
+        train_df = load_data(argv[1])
+        dev_df = load_data(argv[2])
+    else:
+        base_model = argv[1]
+        train_df = load_data(argv[2])
+        dev_df = load_data(argv[3])
+    task = "pretraining"
+    train_set = task_dataset[task](train_df)
+    dev_set = task_dataset[task](dev_df)
+
+    ## Training parameters
+    if base_model:
+        model = models.PretrainedSynonymModel(
+            base=models.SynonymModule,
+            model_name=base_model).to(device)
+    else:
+        model = models.PretrainedGeneralistModel(
+            base=models.GeneralistModel,).to(device)
+    input_tags = ["full_context", "homonym"]
+    label_tag = "mask"
+    metric_label = "mask"
+    epochs = 10
+    batch_size = 32
+    metric = metrics.accuracy
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optim_params = {
+        "betas": (0.7, 0.999),
+        "lr": 1e-3,
+        "weight_decay": 0.2
+        }
+    optim = torch.optim.AdamW([
+        {
+            'params': model.base_model.model.parameters(),
+            'lr': 1e-3,
+            'weight_decay':0.2
+            },
+        {
+            'params': [param \
+                for name, param in model.base_model.named_parameters() \
+                    if "K" in name or "Q" in name or "V" in name],
+            'lr': 1e-3,
+            'weight_decay': 0.2
+            }
+        ],
+        betas=(0.7, 0.999))
+    total_steps = len(train_set)//batch_size*epochs
+    scheduler = get_cosine_schedule_with_warmup(
+        optim,
+        num_warmup_steps=total_steps*.10,
+        num_training_steps=total_steps*.90
+    )
+    freeze_schedule = {
+        0: ([model.classifier],[])}
+    mask = True
+    
+    # Model Training and Eval
+    model_path = train(
+                    model,
+                    train_set,
+                    dev_set,
+                    input_tags = input_tags,
+                    label_tag = label_tag,
+                    metric_label = metric_label,
+                    loss_fn = loss_fn,
+                    optimizer = optim,
+                    lr_scheduler = scheduler,
+                    metric = metric,
+                    n_epochs = epochs,
+                    batch_size = batch_size,
+                    freeze_schedule = freeze_schedule,
+                    mask = mask,
+                    )
