@@ -1,14 +1,16 @@
 model:
-  # Model Configuration
-  name: "CCE"
-  encoder: "sentence-transformers/all-mpnet-base-v2" # Hugging Face model
-  architecture: "CrossContextSimilarityModule"
-  huggingface: False
-  wrapper: ~
-  d_attn: ~
-  drop_attn: ~
-  drop_cls: ~
-  fine_tune: False
+
+  name: "SER"
+  encoder: "google-bert/bert-base-cased"
+  architecture: "SynonymModel"
+  wrapper: "PretrainedSynonymModel"
+
+  hidden_sizes:
+    - 50
+  d_attn: 768
+  drop_attn: 0.4
+  drop_cls: 0.3
+  fine_tune: false
   max_len: 512
 
 
@@ -20,14 +22,14 @@ data:
   input_tags:
     - "source"
     - "target"
-  label_tag: "probs"
-  metric_tag: "interval"
+  label_tag: "mask"
+  metric_tag: "mask"
 
 
 training:
-  # Pretrained Model Path
-  prev_path: "top_models/cce-all-mpnet-base-v2.safetensors"  # Use null for training from scratch, or path/repo for fine-tuning
-  task: "encoder-ft"
+  # Pretrained Model Path and task
+  prev_path: null  # Use null for training from scratch, or path/repo for fine-tuning
+  task: "pretrain"
   
   # Training Parameters
   train_batch_size: 64
@@ -36,24 +38,36 @@ training:
   scheduler_type: "cosine"  # Options: linear, cosine, constant
   
   # Loss Function Configuration
-  loss_type: "KLDivLoss"
+  loss_type: "CrossEntropyLoss"
   loss_betas:
     - 0.7
     - 0.999
   loss_reduction: "mean"
-  masking: 0
-  
+  masking: 1
+
+  lr_others: !!float 3e-5
   # Learning Rate and Weight Decay
+
+  lr_encoder: !!float 1e-5
+  lr_attn: !!float 5e-5
   param_groups:
     encoder:
       - context_former
       - sentence_former
-  lr_encoder: !!float 1e-5
-  lr_others: !!float 3e-5
   weight_decay_encoder: 0.1
   weight_decay_other: 0.01
   
   # Checkpoint Management
   save_total_limit: 3  # Maximum number of checkpoints to save
   
-  freeze_components: null
+  # Advanced Training Settings
+  size_sup: -1
+  shuffle: true
+  random_drop: true
+  
+  freeze_components:
+    !!int 0:
+      freeze:
+        - classifier
+      unfreeze: []
+

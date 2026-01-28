@@ -54,6 +54,8 @@ model_key = {
     "PretrainedGeneralistModel": models.PretrainedGeneralistModel,
     "BaselineModule": models.BaselineModule,
     "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
+    "SynonymModel": models.SynonymModel,
+    "PretrainedSynonymModel": models.PretrainedSynonymModel
 }
 metric_key = {
     "mask": metrics.accuracy,

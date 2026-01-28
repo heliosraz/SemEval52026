@@ -655,7 +655,7 @@ class PretrainedGeneralistModel(ModuleWrapper):
         y = self.classifier(x)  # [16, 1, d_attn] -> [16, class_out]
         return y, mask_res
 
-class SynonymModule(GeneralistModel):
+class SynonymModel(GeneralistModel):
     """TODO docstring"""
     
     def __init__(self,
@@ -694,7 +694,7 @@ class SynonymModule(GeneralistModel):
         """largely borrowed from GeneralistModule, w/ minor changes to account for change
         in model
         """
-        data["sep"] = [self.model.tokenizer.sep_token]*len(data)
+        data["sep"] = [self.model.tokenizer.sep_token]*len(data[select[1]])
 
         sep_toks = self.model.tokenizer(data["sep"], return_tensors = "pt",
                                         padding=False).to(device)
@@ -719,8 +719,8 @@ class SynonymModule(GeneralistModel):
                                          max_length=3,
                                          truncation=True).to(device) 
 
-        # if mask:
-        #     syn_toks, masks = self.model.mask(synonyms, syn_toks)
+        if mask:
+            syn_toks, masks = self.model.mask(synonyms, syn_toks)
 
         
         input_seq = {"input_ids": torch.concat([syn_toks["input_ids"],
@@ -774,15 +774,16 @@ class SynonymModule(GeneralistModel):
 
 class PretrainedSynonymModel(PretrainedGeneralistModel):
     def __init__(self, 
-        base = SynonymModule,
-        model_name = "google-bert/bert-base-cased",
+        base_type = SynonymModel,
+        base_name = "google-bert/bert-base-cased",
         max_length = 512,
         d_attn = 128,
+        hidden_sizes = [50],
         drop_attn = 0.4,
         drop_cls = 0.4):
         super().__init__()
-        self.name = model_name
-        self.base_model = base(model_name, max_length, d_attn, dropout_p = drop_attn)
+        self.name = base_name
+        self.base_model = base_type(base_name, max_length, d_attn, dropout_p = drop_attn)
         vocab_size = self.base_model.get_vocab_size()
         self.classifier = ClassifierModule(
             input_len = d_attn,
