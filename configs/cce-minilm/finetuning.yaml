@@ -7,7 +7,7 @@ model:
   wrapper: ~
   d_attn: ~
   drop_attn: ~
-  drop_cls: ~
+  drop_cls: 0.3
   fine_tune: False
   max_len: 512
 
