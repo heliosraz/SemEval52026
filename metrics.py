@@ -1,4 +1,9 @@
 def accuracy(preds, labels):
-    return sum([pred==l for pred, l in zip(preds, labels)])
+    return sum([pred == l for pred, l in zip(preds, labels)])
+
+
 def range(preds, labels):
-    return sum([m[0]<=pred<=m[1] for pred, m in zip(preds, labels)])
+    correct = 0
+    for bottom, top, pred in zip(labels[0], labels[1], preds):
+        correct += bottom.item() <= pred.item() <= top.item()
+    return correct

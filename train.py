@@ -104,8 +104,14 @@ class Trainer:
 
     def one_step(self, batch):
         X_batch = batch
-        y_pred, mask_keys = self.model(X_batch, select=self.input_tags, mask=self.mask)
-        batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
+        if self.mask:
+            y_pred, mask_keys = self.model(
+                X_batch, select=self.input_tags, mask=self.mask
+            )
+            batch["mask"] = torch.Tensor(mask_keys["mask_ids"])
+        else:
+            y_pred = self.model(X_batch, select=self.input_tags, mask=self.mask)
+
         y_labels = (
             torch.stack(batch[self.label_tag], dim=1).float()
             if isinstance(batch[self.label_tag], list)
@@ -116,7 +122,8 @@ class Trainer:
         elif isinstance(self.loss_fn, torch.nn.KLDivLoss):
             y_pred = torch.log_softmax(y_pred, dim=1)
         loss = self.loss_fn(y_pred, y_labels.to(device))
-        metric = self.compute_metric(y_labels, torch.argmax(y_pred, dim=1))
+        y_metric = batch[self.metric_label]
+        metric = self.compute_metric(torch.argmax(y_pred, dim=1), y_metric)
         return loss, metric
 
     def run(
