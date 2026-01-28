@@ -1,0 +1,28 @@
+model:
+  # Model Configuration
+  name: "CCE"
+  encoder: "google-bert/bert-base-cased" # Hugging Face model
+  architecture: "BaselineModule"
+  huggingface: False
+  wrapper: ~
+  d_attn: ~
+  drop_attn: ~
+  drop_cls: ~
+  fine_tune: False
+  max_len: 512
+
+
+data:
+  # Directory Paths
+  data: "data/dev.json"
+  output: "output/"
+  input_tags:
+    - "full_context"
+    - "example_sentence"
+  label_tag: "average"
+
+
+evaluation:
+  # Pretrained Model Path and Task
+  prev_path: "checkpoint/DXA_bert-base-cased/"
+  task: "eval"

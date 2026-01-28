@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "DefX-bert"
+  name: "DXA-bert"
   encoder: "distilbert/distilbert-base-cased" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "GeneralistModelScored"
