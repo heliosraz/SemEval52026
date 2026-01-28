@@ -1,0 +1,28 @@
+model:
+  # Model Configuration
+  name: "CCE"
+  encoder: "sentence-transformers/all-distilroberta-v1" # Hugging Face model
+  architecture: "CrossContextSimilarityModule"
+  huggingface: False
+  wrapper: ~
+  d_attn: ~
+  drop_attn: ~
+  drop_cls: ~
+  fine_tune: False
+  max_len: 512
+
+
+data:
+  # Directory Paths
+  data: "data/dev.json"
+  output: "output/"
+  input_tags:
+    - "full_context"
+    - "example_sentence"
+  label_tag: "average"
+
+
+evaluation:
+  # Pretrained Model Path and Task
+  prev_path: "top_models/cce-all-distilroberta-v1.safetensors"
+  task: "eval"

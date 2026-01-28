@@ -1,0 +1,59 @@
+model:
+  # Model Configuration
+  name: "CCE"
+  encoder: "sentence-transformers/all-roberta-large-v1" # Hugging Face model
+  architecture: "CrossContextSimilarityModule"
+  huggingface: False
+  wrapper: ~
+  d_attn: ~
+  drop_attn: ~
+  drop_cls: ~
+  fine_tune: False
+  max_len: 512
+
+
+data:
+  # Directory Paths
+  root_dir: "none"
+  train_data: "data/pretraining/train_augmented.json"
+  val_data: "data/pretraining/dev_augmented.json"
+  input_tags:
+    - "source"
+    - "target"
+  label_tag: "probs"
+  metric_tag: "interval"
+
+
+training:
+  # Pretrained Model Path
+  prev_path: "top_models/cce-all-roberta-large-v1.safetensors"  # Use null for training from scratch, or path/repo for fine-tuning
+  task: "encoder-ft"
+  
+  # Training Parameters
+  train_batch_size: 64
+  epochs: 100
+  warmup_ratio: 0.05
+  scheduler_type: "cosine"  # Options: linear, cosine, constant
+  
+  # Loss Function Configuration
+  loss_type: "KLDivLoss"
+  loss_betas:
+    - 0.7
+    - 0.999
+  loss_reduction: "mean"
+  masking: 0
+  
+  # Learning Rate and Weight Decay
+  param_groups:
+    encoder:
+      - context_former
+      - sentence_former
+  lr_encoder: !!float 1e-5
+  lr_others: !!float 3e-5
+  weight_decay_encoder: 0.1
+  weight_decay_other: 0.01
+  
+  # Checkpoint Management
+  save_total_limit: 3  # Maximum number of checkpoints to save
+  
+  freeze_components: null
