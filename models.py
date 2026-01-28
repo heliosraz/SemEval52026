@@ -115,7 +115,7 @@ class ContextEmbedModule(torch.nn.Module):
         # for each masking index generate a pseudo-mask
         # or gather the true token id and mask
         for i, replace_ind in enumerate(mask_res["mask_inds"]):
-            if replace_ind < 0:
+            if replace_ind < 0 or replace_ind >= len(tokens["input_ids"][i]):
                 replace_ind = randint(0, len(instances["input_ids"][i]) - 1)
                 mask_res["mask_inds"][i] = replace_ind
                 true_token = instances["input_ids"][i][replace_ind]
@@ -488,10 +488,10 @@ class GeneralistModel(torch.nn.Module):
 
         self.drop_attn = dropout_p
 
-    def train(self):
+    def train(self, mode="train"):
         self.training = True
 
-    def eval(self):
+    def eval(self, mode="eval"):
         self.training = False
 
     def get_vocab_size(self):
@@ -672,7 +672,10 @@ class PretrainedGeneralistModel(ModuleWrapper):
         return y, mask_res
 
 class SynonymModel(GeneralistModel):
-    """TODO docstring"""
+    """GLiNER-based model, using WordNet senses
+    as the equivalent of entity tokens. Otherwise,
+    identical to the GeneralistModel implementation of GLiNER
+    """
     
     def __init__(self,
                  model_name: str = "google-bert/bert-base-cased",
@@ -689,7 +692,7 @@ class SynonymModel(GeneralistModel):
         self.n_syns = n_syns
         self.syn_length = n_syns * 2 + 2
         self.ctx_length = max_length - self.syn_length 
-        self.max_length =  self.syn_length + self.ctx_length + 1  # syns | sep | ctx | wd: 
+        self.max_length =  self.syn_length + self.ctx_length + 3  # syns | sep | ctx | wd: 
 
         self.model = ContextEmbedModule(model_name, self.max_length)
         n = self.model.get_embedding_size()
@@ -704,8 +707,6 @@ class SynonymModel(GeneralistModel):
         self.train_mode = False
         self.drop_attn = dropout_p
 
-        
-
     def forward(self, data: Dict, select=["full_context", "homonym"], mask=False):
         """largely borrowed from GeneralistModule, w/ minor changes to account for change
         in model
@@ -716,7 +717,7 @@ class SynonymModel(GeneralistModel):
                                         padding=False).to(device)
         sep_toks["attention_mask"] = torch.zeros(sep_toks["attention_mask"].shape).to(device)
         sep_size = len(sep_toks["input_ids"][0])
-        print(len(sep_toks["input_ids"][0]))
+
         synonyms = list(map(self.wordnet_synonyms, data[select[1]]))
         
         syn_toks = self.model.tokenizer(synonyms,
@@ -728,7 +729,7 @@ class SynonymModel(GeneralistModel):
         context_toks = self.model.tokenizer(data[select[0]],
                                             return_tensors="pt",padding="max_length",
                                             truncation=True,
-                                            max_length=self.ctx_length - sep_size).to(device)
+                                            max_length=self.ctx_length - sep_size - 3).to(device)
         word_toks = self.model.tokenizer(data[select[1]],
                                          return_tensors="pt",
                                          padding="max_length",
@@ -738,7 +739,6 @@ class SynonymModel(GeneralistModel):
         if mask:
             syn_toks, masks = self.model.mask(synonyms, syn_toks)
 
-        
         input_seq = {"input_ids": torch.concat([syn_toks["input_ids"],
                                                 sep_toks["input_ids"],
                                                 context_toks["input_ids"],
@@ -748,7 +748,8 @@ class SynonymModel(GeneralistModel):
                                                     context_toks["attention_mask"],
                                                     word_toks["attention_mask"]],axis=1)}
 
-                
+        
+        
         input_embeds = self.model(
                                 input_seq,
                                 tokenize = False)
@@ -761,8 +762,10 @@ class SynonymModel(GeneralistModel):
         context_embeds = []
         for i in range(input_embeds.shape[0]):
             start, end = sep_inds[i]
+            synonym_embeds.append(input_embeds[i, :start, :])
+            context_embeds.append(input_embeds[i, end:, :])
         context_embeds = torch.stack(context_embeds)
-        
+        synonym_embeds = torch.stack(synonym_embeds)
 
         #TODO post-refiner attn layers
         refined_ctx = self.K(context_embeds)
@@ -776,15 +779,14 @@ class SynonymModel(GeneralistModel):
                                               aggre_value,
                                               attn_mask=attn_mask,
                                               dropout_p=self.drop_attn)
-        return x, #masks
+        return x, masks
 
     
     def wordnet_synonyms(self, w: str) -> str:
         """TODO docstring"""
         syns = wn.synonyms(w)
-        pairs = list(zip(["[SNS] " ] * len(syns), set(f"{wd[0]}" for wd in syns if wd)))[:self.n_syns-1]
+        pairs = list(zip(["[SNS] " ] * len(syns), set(f"{wd[0]}" for wd in syns if wd)))[:self.n_syns]
         pairs.append(("[SNS] ", "[MISC]"))
-        print(pairs)
         return "".join("".join(p) for p in pairs)
 
 
