@@ -1,7 +1,7 @@
 model:
   # Model Configuration
   name: "DXA"
-  encoder: "google-bert/bert-base-cased" # Hugging Face model
+  encoder: "distilbert/distilbert-base-cased" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "GeneralistModelScored"
   huggingface: False

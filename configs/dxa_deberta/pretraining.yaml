@@ -45,10 +45,20 @@ training:
   masking: 1
   
   # Learning Rate and Weight Decay
-  lr_encoder: !!float 1e-5
-  lr_attn: !!float 5e-5
+  param_groups:
+    encoder:
+      layers:
+        - model.model
+      lr: !!float 1e-5
+      weight_decay: 0.1
+    attn:
+      layers:
+        - K
+        - Q
+        - V
+      lr: !!float 5e-5
+      weight_decay: 0.1
   lr_others: !!float 3e-5
-  weight_decay_encoder: 0.1
   weight_decay_other: 0.01
   
   # Checkpoint Management
