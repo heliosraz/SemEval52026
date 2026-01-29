@@ -51,12 +51,12 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
         for batch in tqdm(loader):
             preds = model(batch, select)
             if len(preds.shape) > 1:
-                # preds = torch.argmax(preds, dim=1) + 1
-                preds = torch.softmax(preds, dim=1)
-                preds = [
-                    sum([(i + 1) * prob for i, prob in enumerate(pred.tolist())])
-                    for pred in preds
-                ]
+                preds = (torch.argmax(preds, dim=1) + 1).cpu()
+                # preds = torch.softmax(preds, dim=1)
+                # preds = [
+                #     sum([(i + 1) * prob for i, prob in enumerate(pred.tolist())])
+                #     for pred in preds
+                # ]
             else:
                 # preds = torch.round(preds) + 1
                 preds = (preds + 1).cpu()
@@ -64,7 +64,7 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
             y["id"] = batch["index"]
             res = pd.concat([res, y])
     res["id"] = res["id"].astype("str")
-    res["prediction"] = res["prediction"].astype("int")
+    res["prediction"] = res["prediction"]
     return res
 
 
