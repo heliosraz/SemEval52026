@@ -352,6 +352,12 @@ def get_loss_fn(**kwargs):
     return loss_key[loss_type](reduction=loss_reduction)
 
 
+def print_parameters(model: torch.nn.Module):
+    print("#" * 5 + "NAMED PARAMETERS" + "#" * 5)
+    for name, _ in model.named_parameters():
+        print(name)
+
+
 def main(config):
     ## Data Processing
     task = config.training["task"]
@@ -382,6 +388,8 @@ def main(config):
         ).to(device)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
+
+    print_parameters(model)
 
     ## Training Parameters
     loss_fn = get_loss_fn(**config.training)
