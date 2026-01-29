@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "DXA"
+  name: "ft-DXA"
   encoder: "google-bert/bert-base-cased" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "GeneralistModelScored"
@@ -74,14 +74,68 @@ training:
     0:
       freeze:
         - base_model
-      unfreeze: []
-    50:
+        - classifier.layers.0
+      unfreeze:
+        - classifier.layers.1
+    1:
+      freeze: []
+      unfreeze:
+        - classifier.layers.0
+    2:
       freeze: []
       unfreeze:
         - K
         - V
         - Q
-    75:
+    3:
       freeze: []
       unfreeze:
-        - encoder
+        - encoder.layer.11
+    4:
+      freeze: []
+      unfreeze:
+        - encoder.layer.10
+    5:
+      freeze: []
+      unfreeze:
+        - encoder.layer.9
+    6:
+      freeze: []
+      unfreeze:
+        - encoder.layer.8
+    7:
+      freeze: []
+      unfreeze:
+        - encoder.layer.7
+    8:
+      freeze: []
+      unfreeze:
+        - encoder.layer.6
+    9:
+      freeze: []
+      unfreeze:
+        - encoder.layer.5
+    10:
+      freeze: []
+      unfreeze:
+        - encoder.layer.4
+    11:
+      freeze: []
+      unfreeze:
+        - encoder.layer.3
+    12:
+      freeze: []
+      unfreeze:
+        - encoder.layer.2
+    13:
+      freeze: []
+      unfreeze:
+        - encoder.layer.1
+    14:
+      freeze: []
+      unfreeze:
+        - encoder.layer.0
+    15:
+      freeze: []
+      unfreeze:
+        - model.embeddings

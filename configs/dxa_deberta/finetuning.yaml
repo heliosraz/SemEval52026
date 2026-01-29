@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "DefX-bert"
+  name: "ft-DXA"
   encoder: "microsoft/deberta-v3-base" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "GeneralistModelScored"
@@ -74,14 +74,44 @@ training:
     0:
       freeze:
         - base_model
-      unfreeze: []
-    50:
+        - classifier.layers.0
+      unfreeze:
+        - classifier.layers.1
+    1:
+      freeze: []
+      unfreeze:
+        - classifier.layers.0
+    2:
       freeze: []
       unfreeze:
         - K
         - V
         - Q
-    75:
+    3:
       freeze: []
       unfreeze:
-        - encoder
+        - encoder.layer.5
+    4:
+      freeze: []
+      unfreeze:
+        - encoder.layer.4
+    5:
+      freeze: []
+      unfreeze:
+        - encoder.layer.3
+    6:
+      freeze: []
+      unfreeze:
+        - encoder.layer.2
+    7:
+      freeze: []
+      unfreeze:
+        - encoder.layer.1
+    8:
+      freeze: []
+      unfreeze:
+        - encoder.layer.0
+    9:
+      freeze: []
+      unfreeze:
+        - model.embeddings
