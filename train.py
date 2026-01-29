@@ -164,11 +164,13 @@ class Trainer:
                 for layer in self.freeze_schedule[str(epoch)]["freeze"]:
                     for name, param in self.model.named_parameters():
                         if layer in name:
+                            print(f"Freezing {name}")
                             param.requires_grad = False
                 # Unfreeze
                 for layer in self.freeze_schedule[str(epoch)]["unfreeze"]:
                     for name, param in self.model.named_parameters():
                         if layer in name:
+                            print(f"Unfreezing {name}")
                             param.requires_grad = True
             running_tacc = 0
             running_loss = 0.0
