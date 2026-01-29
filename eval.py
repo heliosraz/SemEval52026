@@ -49,12 +49,13 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
     res = pd.DataFrame(columns=["id", "prediction"])
     with torch.no_grad():
         for batch in tqdm(loader):
-            pred = model(batch, select)
-            if len(pred.shape) > 1:
-                pred = torch.argmax(pred, dim=1) + 1
+            preds = model(batch, select)
+            if len(preds.shape) > 1:
+                preds = torch.argmax(preds, dim=1) + 1
+                # preds = sum([(i+1)*prob for pred in preds for i, prob in enumerate(pred.tolist())])
             else:
-                pred = torch.round(pred) + 1
-            y = pd.DataFrame(pred.cpu(), columns=["prediction"])
+                preds = torch.round(preds) + 1
+            y = pd.DataFrame(preds.cpu(), columns=["prediction"])
             y["id"] = batch["index"]
             res = pd.concat([res, y])
     res["id"] = res["id"].astype("str")
