@@ -19,16 +19,13 @@ def load_data(path):
 
 
 def sample_distribution(mean, stdev, n_labels=5):
-    return torch.softmax(
-        torch.exp(
-            -0.5
-            * (
-                (torch.arange(n_labels).unsqueeze(0) - mean.unsqueeze(1))
-                / stdev.unsqueeze(1)
-            )
-            ** 2
-        ),
-        dim=-1,
+    return torch.exp(
+        -0.5
+        * (
+            (torch.arange(n_labels).unsqueeze(0) - mean.unsqueeze(1))
+            / stdev.unsqueeze(1)
+        )
+        ** 2
     ).float()
 
 
@@ -56,8 +53,8 @@ def augment_data(path):
                 aug_data["average"] += [row["average"] - 1, 4]
                 stdev = torch.Tensor([row["stdev"], 0])
                 average = torch.Tensor([row["average"], 5]) - 1
-                stdev.masked_fill_(stdev == 0, float("1e-20"))
-                aug_data["probs"] += sample_distribution(stdev, average).tolist()
+                stdev.masked_fill_(stdev == 0, float("1e-40"))
+                aug_data["probs"] += sample_distribution(average, stdev).tolist()
                 aug_data["interval"] += [
                     (row["average"] + row["stdev"], row["average"] - row["stdev"]),
                     (4, 4),
@@ -68,12 +65,12 @@ def augment_data(path):
             aug_data["average"] += [4]
             stdev = torch.Tensor([0])
             average = torch.Tensor([4])
-            stdev.masked_fill_(stdev == 0, float("1e-20"))
-            aug_data["probs"] += sample_distribution(stdev, average).tolist()
+            stdev.masked_fill_(stdev == 0, float("1e-40"))
+            aug_data["probs"] += sample_distribution(average, stdev).tolist()
             aug_data["interval"] += [(4, 4)]
     aug_data = pd.DataFrame(aug_data)
     aug_data.to_json(
-        os.path.join(root, "pretraining", "{}_augmented.json".format(split)),
+        os.path.join(root, "{}_augmented.json".format(split)),
         orient="index",
         indent=4,
     )
@@ -101,7 +98,7 @@ def read_yaml_file(file_path):
 
 if __name__ == "__main__":
     root = os.path.join(".", "data")
-    for f_name in ["test.json"]:
-        add_context(os.path.join(root, f_name))
-        # augment_data(os.path.join(root, f_name))
+    for f_name in ["train.json", "dev.json"]:
+        # add_context(os.path.join(root, f_name))
+        augment_data(os.path.join(root, f_name))
 #
