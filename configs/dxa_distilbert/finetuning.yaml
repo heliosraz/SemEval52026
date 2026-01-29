@@ -90,55 +90,28 @@ training:
     3:
       freeze: []
       unfreeze:
-        - encoder.layer.11
+        - transformer.layer.5
     4:
       freeze: []
       unfreeze:
-        - encoder.layer.10
+        - transformer.layer.4
     5:
       freeze: []
       unfreeze:
-        - encoder.layer.9
+        - transformer.layer.3
     6:
       freeze: []
       unfreeze:
-        - encoder.layer.8
+        - transformer.layer.2
     7:
       freeze: []
       unfreeze:
-        - encoder.layer.7
+        - transformer.layer.1
     8:
       freeze: []
       unfreeze:
-        - encoder.layer.6
+        - transformer.layer.0
     9:
       freeze: []
       unfreeze:
-        - encoder.layer.5
-    10:
-      freeze: []
-      unfreeze:
-        - encoder.layer.4
-    11:
-      freeze: []
-      unfreeze:
-        - encoder.layer.3
-    12:
-      freeze: []
-      unfreeze:
-        - encoder.layer.2
-    13:
-      freeze: []
-      unfreeze:
-        - encoder.layer.1
-    14:
-      freeze: []
-      unfreeze:
-        - encoder.layer.0
-    15:
-      freeze: []
-      unfreeze:
-        - model.embeddings
-      freeze: []
-      unfreeze:
-        - encoder
+        - embeddings

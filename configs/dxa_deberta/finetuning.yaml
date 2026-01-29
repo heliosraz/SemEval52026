@@ -27,7 +27,7 @@ data:
 
 training:
   # Pretrained Model Path
-  prev_path: "checkpoint/DXA_deberta-v3-base/"  # Use null for training from scratch, or path/repo for fine-tuning
+  prev_path: "checkpoint/DXA_deberta-v3-base/20260129_104921/DXA_deberta-v3-base_2.safetensors"  # Use null for training from scratch, or path/repo for fine-tuning
   task: "classifier-ft"
   
   # Training Parameters
@@ -90,28 +90,57 @@ training:
     3:
       freeze: []
       unfreeze:
-        - encoder.layer.5
+        - LayerNorm
+        - rel_embeddings
     4:
       freeze: []
       unfreeze:
-        - encoder.layer.4
+        - encoder.layer.11
     5:
       freeze: []
       unfreeze:
-        - encoder.layer.3
+        - encoder.layer.10
     6:
       freeze: []
       unfreeze:
-        - encoder.layer.2
+        - encoder.layer.9
     7:
       freeze: []
       unfreeze:
-        - encoder.layer.1
+        - encoder.layer.8
     8:
       freeze: []
       unfreeze:
-        - encoder.layer.0
+        - encoder.layer.7
     9:
+      freeze: []
+      unfreeze:
+        - encoder.layer.6
+    10:
+      freeze: []
+      unfreeze:
+        - encoder.layer.5
+    11:
+      freeze: []
+      unfreeze:
+        - encoder.layer.4
+    12:
+      freeze: []
+      unfreeze:
+        - encoder.layer.3
+    13:
+      freeze: []
+      unfreeze:
+        - encoder.layer.2
+    14:
+      freeze: []
+      unfreeze:
+        - encoder.layer.1
+    15:
+      freeze: []
+      unfreeze:
+        - encoder.layer.0
+    16:
       freeze: []
       unfreeze:
         - model.embeddings
