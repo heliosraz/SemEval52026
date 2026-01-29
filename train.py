@@ -5,7 +5,7 @@ from sys import argv
 from torch.utils.data import DataLoader, Dataset, Subset
 from data_structs import WordSenseData, AugWordSenseData
 import pandas as pd
-from safetensors.torch import save_file, load_model
+from safetensors.torch import save_file, load_file
 import os
 import models
 import matplotlib.pyplot as plt
@@ -55,7 +55,8 @@ model_key = {
     "BaselineModule": models.BaselineModule,
     "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
     "SynonymModel": models.SynonymModel,
-    "PretrainedSynonymModel": models.PretrainedSynonymModel
+    "PretrainedSynonymModel": models.PretrainedSynonymModel,
+    "GeneralistModelScored": models.GeneralistModelScored,
 }
 metric_key = {
     "mask": metrics.accuracy,
@@ -66,6 +67,13 @@ loss_key = {
     "CrossEntropyLoss": torch.nn.CrossEntropyLoss,
     "KLDivLoss": torch.nn.KLDivLoss,
 }
+
+
+def load_model(model, path):
+    state_dict = load_file(path)
+
+    model.load_state_dict(state_dict, strict=False)
+    print(f"Model loaded from {path} (strict=False)")
 
 
 class Trainer:
@@ -385,15 +393,15 @@ def main(config):
     for group in config.training["param_groups"]:
         param_groups[group] = []
         for name, param in model.named_parameters():
-            for layer in config.training["param_groups"][group]:
+            for layer in config.training["param_groups"][group]["layers"]:
                 if layer in name:
                     param_groups[group].append(param)
     optim = torch.optim.AdamW(
         [
             {
                 "params": param_groups[group],
-                "lr": config.training[f"lr_{group}"],
-                "weight_decay": config.training[f"weight_decay_{group}"],
+                "lr": config.training["param_groups"][group]["lr"],
+                "weight_decay": config.training["param_groups"][group]["weight_decay"],
             }
             for group in param_groups
         ],

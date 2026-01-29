@@ -16,8 +16,8 @@ model:
 data:
   # Directory Paths
   root_dir: "none"
-  train_data: "data/pretraining/train_augmented.json"
-  val_data: "data/pretraining/dev_augmented.json"
+  train_data: "data/train_augmented.json"
+  val_data: "data/dev_augmented.json"
   input_tags:
     - "source"
     - "target"
@@ -27,7 +27,7 @@ data:
 
 training:
   # Pretrained Model Path
-  prev_path: "checkpoint/DXA_bert-base-cased/"  # Use null for training from scratch, or path/repo for fine-tuning
+  prev_path: "checkpoint/DXA_bert-base-cased/20260128_121709/DXA_bert-base-cased_2.safetensors"  # Use null for training from scratch, or path/repo for fine-tuning
   task: "classifier-ft"
   
   # Training Parameters
@@ -41,12 +41,23 @@ training:
   loss_betas:
     - 0.7
     - 0.999
-  loss_reduction: "mean"
+  loss_reduction: "batchmean"
   masking: 1
   
   # Learning Rate and Weight Decay
-  lr_encoder: !!float 1e-5
-  lr_attn: !!float 5e-5
+  param_groups:
+    encoder:
+      layers:
+        - model.model
+      lr: !!float 1e-5
+      weight_decay: 0.1
+    attn:
+      layers:
+        - K
+        - Q
+        - V
+      lr: !!float 5e-5
+      weight_decay: 0.1
   lr_others: !!float 3e-5
   weight_decay_encoder: 0.1
   weight_decay_other: 0.01
@@ -64,13 +75,13 @@ training:
       freeze:
         - base_model
       unfreeze: []
-    1:
+    50:
       freeze: []
       unfreeze:
         - K
         - V
         - Q
-    2:
+    75:
       freeze: []
       unfreeze:
         - encoder
