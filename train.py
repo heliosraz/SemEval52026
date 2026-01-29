@@ -19,6 +19,7 @@ from transformers import (
     get_constant_schedule_with_warmup,
 )
 import atexit
+from peft import LoraModel, LoraConfig
 
 """
 To run script:
@@ -388,6 +389,13 @@ def main(config):
         ).to(device)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
+        lora_config = LoraConfig(
+                r=8,
+                lora_alpha=32,
+                target_modules=["word_embeddings", "position_embeddings", "q" ,"v"],
+        )
+        print(model.named_modules)
+        model = LoraModel(model, lora_config, "default")
 
     print_parameters(model)
 

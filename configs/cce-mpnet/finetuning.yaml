@@ -30,7 +30,7 @@ training:
   task: "encoder-ft"
   
   # Training Parameters
-  train_batch_size: 64
+  train_batch_size: 8
   epochs: 100
   warmup_ratio: 0.05
   scheduler_type: "cosine"  # Options: linear, cosine, constant
@@ -57,4 +57,9 @@ training:
   # Checkpoint Management
   save_total_limit: 3  # Maximum number of checkpoints to save
   
-  freeze_components: null
+  freeze_components:
+    !!int 0:
+      freeze:
+        - auto_model
+      unfreeze:
+        - lora
