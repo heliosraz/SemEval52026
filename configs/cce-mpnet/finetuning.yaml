@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "CCE"
+  name: "ft-CCE"
   encoder: "sentence-transformers/all-mpnet-base-v2" # Hugging Face model
   architecture: "CrossContextSimilarityModule"
   huggingface: False
@@ -46,11 +46,12 @@ training:
   # Learning Rate and Weight Decay
   param_groups:
     encoder:
-      - context_former
-      - sentence_former
-  lr_encoder: !!float 1e-5
+      layers:
+        - context_former
+        - sentence_former
+      lr: !!float 1e-5
+      weight_decay: 0.1
   lr_others: !!float 3e-5
-  weight_decay_encoder: 0.1
   weight_decay_other: 0.01
   
   # Checkpoint Management
