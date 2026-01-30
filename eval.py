@@ -52,12 +52,10 @@ def load_model(model, path):
 
 
 def eval(model, data, select=["full_context", "judged_meaning"]):
-    loader = DataLoader(
-        data,
-        batch_size=64,
-    )
+    loader = DataLoader(data, batch_size=64, num_workers=0, shuffle=False)
     res = pd.DataFrame(columns=["id", "prediction"])
     torch.use_deterministic_algorithms(True)
+    torch.manual_seed(0)
     model.eval()
     with torch.no_grad():
         for batch in tqdm(loader):

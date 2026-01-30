@@ -44,7 +44,7 @@ class ClassifierModule(torch.nn.Module):
         for layer in self.layers[:-1]:
             x = layer(x)
             x = torch.relu(x)
-            x = torch.dropout(x, self.dropout, train=self.training)
+            x = torch.nn.functional.dropout(x, self.dropout, training=self.training)
         return self.layers[-1](x)
 
 
@@ -413,7 +413,9 @@ class GeneralistModel_nosep(torch.nn.Module):
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
         attn_weight += attn_bias
         attn_weight = torch.softmax(attn_weight, dim=-1)
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=self.training)
+        attn_weight = torch.nn.functional.dropout(
+            attn_weight, dropout_p, training=self.training
+        )
         return attn_weight @ value
 
     def forward(
@@ -522,7 +524,9 @@ class GeneralistModel(torch.nn.Module):
         attn_weight = query @ key.transpose(-2, -1) * scale_factor
         attn_weight += attn_bias
         attn_weight = torch.softmax(attn_weight, dim=-1)
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=self.training)
+        attn_weight = torch.nn.functional.dropout(
+            attn_weight, dropout_p, training=self.training
+        )
         return attn_weight @ value
 
     def forward(
