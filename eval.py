@@ -47,6 +47,8 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
         batch_size=64,
     )
     res = pd.DataFrame(columns=["id", "prediction"])
+    torch.use_deterministic_algorithms(True)
+    model.eval()
     with torch.no_grad():
         for batch in tqdm(loader):
             preds = model(batch, select)

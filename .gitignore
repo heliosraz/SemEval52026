@@ -225,3 +225,4 @@ results
 top_models
 wandb
 predictions.jsonl
+*.tar.gz

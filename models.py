@@ -198,9 +198,7 @@ class SentenceEmbedModule(torch.nn.Module):
 
         pooled_output = self.pooling(output)
         embeds = pooled_output["sentence_embedding"]  # Shape: (batch, hidden_dim)
-        # embeds = (
-        #     self.sbert_model.encode(data, convert_to_tensor=True).to(device).clone()
-        # )
+        # embeds = self.sbert_model.encode(data, convert_to_tensor=True).to(device)
         return embeds
 
 
