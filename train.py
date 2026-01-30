@@ -384,12 +384,14 @@ def main(config):
             d_attn=config["model"]["d_attn"],
             drop_attn=config["model"]["drop_attn"],
             drop_cls=config["model"]["drop_cls"],
+            device=device,
         ).to(device)
     else:
         model = base_model(
             model_name=encoder,
             max_length=config["model"]["max_len"],
             drop_cls=config["model"]["drop_cls"],
+            device=device,
         ).to(device)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])

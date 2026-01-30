@@ -11,12 +11,10 @@ import json
 import os
 from tqdm import tqdm
 
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
+torch.use_deterministic_algorithms(True)
+torch.manual_seed(0)
+
+device = torch.device("cpu")
 print("DEVICE: {}".format(device))
 
 task_dataset = {
@@ -54,8 +52,6 @@ def load_model(model, path):
 def eval(model, data, select=["full_context", "judged_meaning"]):
     loader = DataLoader(data, batch_size=64, num_workers=0, shuffle=False)
     res = pd.DataFrame(columns=["id", "prediction"])
-    torch.use_deterministic_algorithms(True)
-    torch.manual_seed(0)
     model.eval()
     with torch.no_grad():
         for batch in tqdm(loader):
@@ -91,14 +87,15 @@ def main(config):
             max_length=config["model"]["max_len"],
             hidden_sizes=config["model"]["hidden_sizes"],
             d_attn=config["model"]["d_attn"],
-            drop_attn=config["model"]["drop_attn"],
-            drop_cls=config["model"]["drop_cls"],
+            device=device,
         ).to(device)
     else:
         model = base_model(
-            model_name=encoder, max_length=config["model"]["max_len"]
+            model_name=encoder,
+            max_length=config["model"]["max_len"],
+            device=device,
         ).to(device)
-    if not config["model"]["huggingface"]:
+    if config["evaluation"]["prev_path"]:
         load_model(model, config["evaluation"]["prev_path"])
 
     # Data Processing

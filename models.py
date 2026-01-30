@@ -11,14 +11,6 @@ from random import randint
 from abc import ABC, abstractmethod
 
 
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
-
-
 ########## Submodules
 class ClassifierModule(torch.nn.Module):
     """Scores input signal on a scale of 5
@@ -48,23 +40,6 @@ class ClassifierModule(torch.nn.Module):
         return self.layers[-1](x)
 
 
-class RefineModule(torch.nn.Module):
-    def __init__(self, input_len=1, hidden_sizes=[]):
-        super().__init__()
-        if hidden_sizes:
-            layers = [torch.nn.Linear(input_len, hidden_sizes[0])]
-            for h_i, h_j in zip(hidden_sizes, hidden_sizes[1:]):
-                layers.append(torch.nn.Linear(h_i, h_j))
-                layers.append(torch.nn.Tanh())
-            layers.append(torch.nn.Linear(hidden_sizes[-1], 5))
-            self.layers = torch.nn.Sequential(*layers)
-        else:
-            self.layers = torch.nn.Sequential(torch.nn.Linear(1, 5))
-
-    def forward(self, x):
-        return self.layers(x)
-
-
 class ContextEmbedModule(torch.nn.Module):
     """Generates embedding (and offsets) using a given Bert-like model.
     Handles all embedding related tasks.
@@ -74,11 +49,16 @@ class ContextEmbedModule(torch.nn.Module):
         max_length (int): max full_context length of the model used in padding or truncation.
     """
 
-    def __init__(self, model_name="google-bert/bert-base-cased", max_length=512):
+    def __init__(
+        self, model_name="google-bert/bert-base-cased", max_length=512, device="cpu"
+    ):
         super().__init__()
+        self.device = device
         self.max_length = max_length
-        self.model = AutoModel.from_pretrained(model_name)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name, device_map=self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name, device_map=self.device
+        )
 
     def get_embedding_size(self):
         return self.model.config.hidden_size
@@ -103,7 +83,7 @@ class ContextEmbedModule(torch.nn.Module):
 
     def mask(self, data, tokens):
         # find how long each sequence is
-        instances = self.tokenizer(data, padding=False).to(device)
+        instances = self.tokenizer(data, padding=False).to(self.device)
         # print([len(toks) for toks in instances], max([len(toks) for toks in instances]))
         # generate a random masked index (-1 being no mask)
         mask_res = {
@@ -133,7 +113,7 @@ class ContextEmbedModule(torch.nn.Module):
                 padding="max_length",
                 max_length=self.max_length,
                 return_offsets_mapping=offset,
-            ).to(device)
+            ).to(self.device)
         else:
             tokens = data
         if offset:
@@ -153,9 +133,10 @@ class ContextOffsetModule(torch.nn.Module):
     """
 
     # separate from BERT module to test this with different models (e.g. LLMs)
-    def __init__(self, model_name="google-bert/bert-base-cased"):
+    def __init__(self, model_name="google-bert/bert-base-cased", device="cpu"):
         super().__init__()
-        self.embed = ContextEmbedModule(model_name)
+        self.device = device
+        self.embed = ContextEmbedModule(model_name, device=self.device)
 
     def forward(self, data: Dict, select=["full_context", "example_sentence"]):
         # taken from benchmark_bert.py
@@ -180,10 +161,14 @@ class SentenceEmbedModule(torch.nn.Module):
     """
 
     def __init__(
-        self, model_name="sentencetransformers/all-MiniLM-L6-v2", max_length=512
+        self,
+        model_name="sentencetransformers/all-MiniLM-L6-v2",
+        max_length=512,
+        device="cpu",
     ):
         super().__init__()
-        self.sbert_model = SentenceTransformer(model_name, device=device)
+        self.device = device
+        self.sbert_model = SentenceTransformer(model_name, device=self.device)
         self.transformer = self.sbert_model[0]
         self.pooling = self.sbert_model[1]
         self.tokenizer = self.sbert_model.tokenizer
@@ -192,7 +177,7 @@ class SentenceEmbedModule(torch.nn.Module):
     def forward(self, data):
         toks = self.tokenizer(
             data, padding="max_length", max_length=self.max_length, return_tensors="pt"
-        ).to(device)
+        ).to(self.device)
         # Get token embeddings
         output = self.transformer(toks)
 
@@ -214,10 +199,12 @@ class BaselineModule(torch.nn.Module):
     def __init__(
         self,
         model_name="google-bert/bert-base-cased",
+        device="cpu",
         **kwargs,
     ):
         super().__init__()
-        self.model = ContextEmbedModule(model_name)
+        self.device = device
+        self.model = ContextEmbedModule(model_name, device=self.device)
         self.sim = torch.nn.CosineSimilarity()
 
     def forward(self, data, select=["full_context", "example_sentence"]):
@@ -244,7 +231,9 @@ class Sentence_SimModule(torch.nn.Module):
         model_name (str): Sbert-like model name
     """
 
-    def __init__(self, device, model_name="sentencetransformers/all-MiniLM-L6-v2"):
+    def __init__(
+        self, model_name="sentencetransformers/all-MiniLM-L6-v2", device="cpu"
+    ):
         super().__init__()
         self.device = device
         self.sbert_model = SentenceTransformer(model_name, device=self.device)
@@ -274,16 +263,20 @@ class SimilarityScoreModule(torch.nn.Module):
         self,
         model_name="google-bert/bert-base-cased",
         use_sbert: bool = False,
+        device="cpu",
         **kwargs,
     ):
-        self.use_sbert = use_sbert
         super().__init__()
+        self.device = device
+        self.use_sbert = use_sbert
         if use_sbert:
-            self.sim = Sentence_SimModule(device, model_name="all-MiniLM-l6-v2")
+            self.sim = Sentence_SimModule(
+                model_name="all-MiniLM-l6-v2", device=self.device
+            )
             for param in self.sim.parameters():
                 param.requires_grad = False
         else:
-            self.offset = ContextOffsetModule(model_name)
+            self.offset = ContextOffsetModule(model_name, device=self.device)
             self.sim = torch.nn.CosineSimilarity()
             for param in self.offset.parameters():
                 param.requires_grad = False
@@ -313,13 +306,17 @@ class CrossContextSimilarityModule(torch.nn.Module):
         model_name="sentence-transformers/all-MiniLM-L6-v2",
         max_length=512,
         drop_cls=0.3,
+        device="cpu",
     ):
         super().__init__()
+        self.device = device
         self.max_length = max_length
         self.context_former = ContextEmbedModule(
-            model_name=model_name, max_length=max_length
+            model_name=model_name, max_length=max_length, device=self.device
         )
-        self.sentence_former = SentenceEmbedModule(model_name=model_name)
+        self.sentence_former = SentenceEmbedModule(
+            model_name=model_name, device=self.device
+        )
 
         self.sim = torch.nn.CosineSimilarity(dim=2)
         self.scorer = ClassifierModule(
@@ -355,10 +352,14 @@ class GeneralistModel_nosep(torch.nn.Module):
         max_length=512,
         d_attn=128,
         dropout_p=0.4,
+        device="cpu",
     ):
         super().__init__()
+        self.device = device
         self.name = model_name
-        self.model = ContextEmbedModule(model_name=model_name, max_length=max_length)
+        self.model = ContextEmbedModule(
+            model_name=model_name, max_length=max_length, device=self.device
+        )
         # for param in self.model.parameters():
         #     param.requires_grad = False
         self.max_length = max_length
@@ -370,12 +371,6 @@ class GeneralistModel_nosep(torch.nn.Module):
         torch.nn.init.xavier_normal_(self.Q.weight)
         torch.nn.init.xavier_normal_(self.V.weight)
         self.drop_attn = dropout_p
-
-    def train(self):
-        self.training = True
-
-    def eval(self):
-        self.training = False
 
     def get_vocab_size(self):
         return self.model.tokenizer.vocab_size
@@ -426,7 +421,7 @@ class GeneralistModel_nosep(torch.nn.Module):
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2,
-        ).to(device)
+        ).to(self.device)
         if mask:
             candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
         context_toks = self.model.tokenizer(
@@ -434,7 +429,7 @@ class GeneralistModel_nosep(torch.nn.Module):
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2,
-        ).to(device)
+        ).to(self.device)
         # separate by [SEP] and feed each into refiner
         candidate_embeds = self.model(candidate_toks, tokenize=False)
         context_embeds = self.model(context_toks, tokenize=False)
@@ -473,10 +468,14 @@ class GeneralistModel(torch.nn.Module):
         max_length=512,
         d_attn=128,
         dropout_p=0.4,
+        device="cpu",
     ):
         super().__init__()
+        self.device = device
         self.name = model_name
-        self.model = ContextEmbedModule(model_name=model_name, max_length=max_length)
+        self.model = ContextEmbedModule(
+            model_name=model_name, max_length=max_length, device=self.device
+        )
         self.max_length = max_length
         n = self.model.get_embedding_size()
         self.K = torch.nn.Linear(n, d_attn, bias=False)
@@ -535,14 +534,14 @@ class GeneralistModel(torch.nn.Module):
         data["sep"] = [self.model.tokenizer.sep_token] * len(data[select[0]])
         sep_toks = self.model.tokenizer(
             data["sep"], return_tensors="pt", padding=False
-        ).to(device)
+        ).to(self.device)
         sep_size = len(sep_toks["input_ids"][0])
         candidate_toks = self.model.tokenizer(
             data[select[1]],
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2 - sep_size,
-        ).to(device)
+        ).to(self.device)
         if mask:
             candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
         context_toks = self.model.tokenizer(
@@ -550,9 +549,9 @@ class GeneralistModel(torch.nn.Module):
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2,
-        ).to(device)
+        ).to(self.device)
         sep_toks["attention_mask"] = torch.zeros(sep_toks["attention_mask"].shape).to(
-            device
+            self.device
         )
         input_seq = {}
         input_seq["input_ids"] = torch.concat(
@@ -620,12 +619,16 @@ class ModuleWrapper(torch.nn.Module, ABC):
         hidden_sizes=[50],
         max_length=512,
         d_attn=128,
-        drop_attn=0.4,
-        drop_cls=0.3,
+        drop_attn=0.0,
+        drop_cls=0.0,
+        device="cpu",
     ):
         super().__init__()
+        self.device = device
         self.base_name = base_name
-        self.base_model = base_type(base_name, max_length, d_attn, dropout_p=drop_attn)
+        self.base_model = base_type(
+            base_name, max_length, d_attn, dropout_p=drop_attn, device=self.device
+        )
         self.classifier = ClassifierModule(
             input_len=d_attn * 2, hidden_sizes=hidden_sizes, dropout=drop_cls
         )
@@ -722,9 +725,9 @@ class SynonymModel(GeneralistModel):
 
         sep_toks = self.model.tokenizer(
             data["sep"], return_tensors="pt", padding=False
-        ).to(device)
+        ).to(self.device)
         sep_toks["attention_mask"] = torch.zeros(sep_toks["attention_mask"].shape).to(
-            device
+            self.device
         )
         sep_size = len(sep_toks["input_ids"][0])
 
@@ -736,7 +739,7 @@ class SynonymModel(GeneralistModel):
             padding="max_length",
             max_length=self.syn_length,
             truncation=True,
-        ).to(device)
+        ).to(self.device)
 
         context_toks = self.model.tokenizer(
             data[select[0]],
@@ -744,14 +747,14 @@ class SynonymModel(GeneralistModel):
             padding="max_length",
             truncation=True,
             max_length=self.ctx_length - sep_size - 3,
-        ).to(device)
+        ).to(self.device)
         word_toks = self.model.tokenizer(
             data[select[1]],
             return_tensors="pt",
             padding="max_length",
             max_length=3,
             truncation=True,
-        ).to(device)
+        ).to(self.device)
 
         if mask:
             syn_toks, masks = self.model.mask(synonyms, syn_toks)
