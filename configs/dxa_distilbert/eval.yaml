@@ -14,7 +14,7 @@ model:
 
 data:
   # Directory Paths
-  data: "data/test.json"
+  data: "data/dev.json"
   output: "output/"
   input_tags:
     - "full_context"

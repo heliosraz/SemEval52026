@@ -486,12 +486,6 @@ class GeneralistModel(torch.nn.Module):
 
         self.drop_attn = dropout_p
 
-    def train(self, mode="train"):
-        self.training = True
-
-    def eval(self, mode="eval"):
-        self.training = False
-
     def get_vocab_size(self):
         return self.model.tokenizer.vocab_size
 
@@ -547,8 +541,6 @@ class GeneralistModel(torch.nn.Module):
         ).to(device)
         if mask:
             candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
-        else:
-            masks = None
         context_toks = self.model.tokenizer(
             data[select[0]],
             return_tensors="pt",
@@ -608,8 +600,9 @@ class GeneralistModel(torch.nn.Module):
             attn_mask=attn_mask,
             dropout_p=self.drop_attn,
         )
-
-        return x, masks
+        if mask:
+            return x, masks
+        return x
 
 
 ########### Wrapper Modules
@@ -643,10 +636,16 @@ class GeneralistModelScored(ModuleWrapper):
         super().__init__(**kwargs)
 
     def forward(self, data, select=["full_context", "judged_meaning"], mask=False):
-        x, mask_res = self.base_model(data, select, mask=mask)
+        if mask:
+            x, mask_res = self.base_model(data, select, mask=mask)
+        else:
+            x = self.base_model(data, select, mask=mask)
         x = torch.cat([x.max(dim=1)[0], x.mean(dim=1)], dim=-1)
         y = self.classifier(x)
-        return y, mask_res
+        if mask:
+            return y, mask_res
+        else:
+            return y
 
 
 class PretrainedGeneralistModel(ModuleWrapper):

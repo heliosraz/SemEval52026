@@ -45,9 +45,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "False"
 
 task_dataset = {
     "eval": WordSenseData,
-    "classifier-ft": AugWordSenseData,
+    "finetuning": AugWordSenseData,
     "pretrain": AugWordSenseData,
-    "encoder-ft": AugWordSenseData,
 }
 model_key = {
     "GeneralistModel_nosep": models.GeneralistModel_nosep,
@@ -134,7 +133,12 @@ class Trainer:
             y_pred = torch.log_softmax(y_pred, dim=1)
         loss = self.loss_fn(y_pred, y_labels.to(device))
         y_metric = batch[self.metric_label]
-        metric = self.compute_metric(torch.argmax(y_pred, dim=1), y_metric)
+        y_preds = torch.softmax(y_pred, dim=1)
+        y_preds = [
+            sum([(i + 1) * prob for i, prob in enumerate(pred.tolist())])
+            for pred in y_preds
+        ]
+        metric = self.compute_metric(y_preds, y_metric)
         return loss, metric
 
     def run(
@@ -389,13 +393,13 @@ def main(config):
         ).to(device)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
-        lora_config = LoraConfig(
-                r=8,
-                lora_alpha=32,
-                target_modules=["word_embeddings", "position_embeddings", "q" ,"v"],
-        )
-        print(model.named_modules)
-        model = LoraModel(model, lora_config, "default")
+        # lora_config = LoraConfig(
+        #     r=8,
+        #     lora_alpha=32,
+        #     target_modules=["word_embeddings", "position_embeddings", "q", "v"],
+        # )
+        # print(model.named_modules)
+        # model = LoraModel(model, lora_config, "default")
 
     print_parameters(model)
 

@@ -5,5 +5,5 @@ def accuracy(preds, labels):
 def range(preds, labels):
     correct = 0
     for bottom, top, pred in zip(labels[0], labels[1], preds):
-        correct += bottom.item() <= pred.item() <= top.item()
+        correct += bottom.item() <= pred <= top.item()
     return correct

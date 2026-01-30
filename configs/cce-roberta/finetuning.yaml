@@ -15,19 +15,18 @@ model:
 data:
   # Directory Paths
   root_dir: "none"
-  train_data: "data/train_augmented.json"
-  val_data: "data/dev_augmented.json"
+  train_data: "data/train_ft.json"
+  val_data: "data/dev_ft.json"
   input_tags:
     - "source"
     - "target"
   label_tag: "probs"
   metric_tag: "interval"
 
-
 training:
   # Pretrained Model Path
   prev_path: "top_models/cce-all-roberta-large-v1.safetensors"  # Use null for training from scratch, or path/repo for fine-tuning
-  task: "encoder-ft"
+  task: "finetuning"
   
   # Training Parameters
   train_batch_size: 64

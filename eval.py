@@ -21,9 +21,8 @@ print("DEVICE: {}".format(device))
 
 task_dataset = {
     "eval": WordSenseData,
-    "classifier-ft": AugWordSenseData,
+    "finetuning": WordSenseData,
     "pretrain": AugWordSenseData,
-    "encoder-ft": AugWordSenseData,
 }
 model_key = {
     "GeneralistModel_nosep": models.GeneralistModel_nosep,
@@ -62,7 +61,7 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
     model.eval()
     with torch.no_grad():
         for batch in tqdm(loader):
-            preds, _ = model(batch, select)
+            preds = model(batch, select)
             if len(preds.shape) > 1:
                 # preds = (torch.argmax(preds, dim=1) + 1).cpu()
                 preds = torch.softmax(preds, dim=1)

@@ -29,7 +29,40 @@ def sample_distribution(mean, stdev, n_labels=5):
     ).float()
 
 
-def augment_data(path):
+def ft_data(path):
+    split, _ = path.split("/")[-1].split(".")
+    data = load_data(path)
+    data["context"] = data["precontext"] + " " + data["sentence"] + " " + data["ending"]
+
+    aug_data = {
+        "target": [],
+        "source": [],
+        "stdev": [],
+        "average": [],
+        "probs": [],
+        "interval": [],
+    }
+    for _, row in data.iterrows():
+        aug_data["target"] += [row["judged_meaning"]]
+        aug_data["source"] += [row["context"]]
+        aug_data["stdev"] += [row["stdev"]]
+        aug_data["average"] += [row["average"] - 1]
+        stdev = torch.Tensor([row["stdev"]])
+        average = torch.Tensor([row["average"] - 1])
+        stdev.masked_fill_(stdev == 0, float("1e-40"))
+        aug_data["probs"] += sample_distribution(average, stdev).tolist()
+        aug_data["interval"] += [
+            (row["average"] - row["stdev"], row["average"] + row["stdev"])
+        ]
+    aug_data = pd.DataFrame(aug_data)
+    aug_data.to_json(
+        os.path.join(root, "{}_ft.json".format(split)),
+        orient="index",
+        indent=4,
+    )
+
+
+def mlm_data(path):
     split, _ = path.split("/")[-1].split(".")
     data = load_data(path)
     data["context"] = data["precontext"] + " " + data["sentence"] + " " + data["ending"]
@@ -56,7 +89,7 @@ def augment_data(path):
                 stdev.masked_fill_(stdev == 0, float("1e-40"))
                 aug_data["probs"] += sample_distribution(average, stdev).tolist()
                 aug_data["interval"] += [
-                    (row["average"] + row["stdev"], row["average"] - row["stdev"]),
+                    (row["average"] - row["stdev"], row["average"] + row["stdev"]),
                     (4, 4),
                 ]
             aug_data["target"] += [row["judged_meaning"]]
@@ -70,7 +103,7 @@ def augment_data(path):
             aug_data["interval"] += [(4, 4)]
     aug_data = pd.DataFrame(aug_data)
     aug_data.to_json(
-        os.path.join(root, "{}_augmented.json".format(split)),
+        os.path.join(root, "{}_mlm.json".format(split)),
         orient="index",
         indent=4,
     )
@@ -100,5 +133,6 @@ if __name__ == "__main__":
     root = os.path.join(".", "data")
     for f_name in ["train.json", "dev.json"]:
         # add_context(os.path.join(root, f_name))
-        augment_data(os.path.join(root, f_name))
+        ft_data(os.path.join(root, f_name))
+        mlm_data(os.path.join(root, f_name))
 #
