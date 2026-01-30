@@ -6,6 +6,8 @@ model:
   wrapper: "GeneralistModelScored"
   huggingface: False
   d_attn: 768
+  hidden_sizes:
+    - 50
   drop_attn: 0.4
   drop_cls: 0.3
   max_len: 512
@@ -22,5 +24,5 @@ data:
 
 evaluation:
   # Pretrained Model Path and Task
-  prev_path: "top_models/cce-all-mpnet-base-v2.safetensors"
+  prev_path: "checkpoint/ft-DXA_distilbert-base-cased/20260129_104931/ft-DXA_distilbert-base-cased_2.safetensors"
   task: "eval"

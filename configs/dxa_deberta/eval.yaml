@@ -6,6 +6,8 @@ model:
   wrapper: "GeneralistModelScored"
   huggingface: False
   d_attn: 768
+  hidden_sizes:
+    - 50
   drop_attn: 0.4
   drop_cls: 0.3
   max_len: 512

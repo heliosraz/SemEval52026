@@ -2,7 +2,7 @@ from data_structs import WordSenseData, AugWordSenseData
 import models
 import metrics
 from sys import argv
-from safetensors.torch import load_model
+from safetensors.torch import save_file, load_file
 import torch
 from data_processing import load_data, read_yaml_file
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -23,6 +23,7 @@ task_dataset = {
     "eval": WordSenseData,
     "classifier-ft": AugWordSenseData,
     "pretrain": AugWordSenseData,
+    "encoder-ft": AugWordSenseData,
 }
 model_key = {
     "GeneralistModel_nosep": models.GeneralistModel_nosep,
@@ -30,15 +31,25 @@ model_key = {
     "PretrainedGeneralistModel": models.PretrainedGeneralistModel,
     "BaselineModule": models.BaselineModule,
     "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
+    "SynonymModel": models.SynonymModel,
+    "PretrainedSynonymModel": models.PretrainedSynonymModel,
+    "GeneralistModelScored": models.GeneralistModelScored,
 }
 metric_key = {
     "mask": metrics.accuracy,
     "average": metrics.range,
+    "interval": metrics.range,
 }
 loss_key = {
     "CrossEntropyLoss": torch.nn.CrossEntropyLoss,
     "KLDivLoss": torch.nn.KLDivLoss,
 }
+
+
+def load_model(model, path):
+    state_dict = load_file(path)
+    model.load_state_dict(state_dict, strict=False)
+    print(f"Model loaded from {path} (strict=False)")
 
 
 def eval(model, data, select=["full_context", "judged_meaning"]):
@@ -51,14 +62,14 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
     model.eval()
     with torch.no_grad():
         for batch in tqdm(loader):
-            preds = model(batch, select)
+            preds, _ = model(batch, select)
             if len(preds.shape) > 1:
-                preds = (torch.argmax(preds, dim=1) + 1).cpu()
-                # preds = torch.softmax(preds, dim=1)
-                # preds = [
-                #     sum([(i + 1) * prob for i, prob in enumerate(pred.tolist())])
-                #     for pred in preds
-                # ]
+                # preds = (torch.argmax(preds, dim=1) + 1).cpu()
+                preds = torch.softmax(preds, dim=1)
+                preds = [
+                    sum([(i + 1) * prob for i, prob in enumerate(pred.tolist())])
+                    for pred in preds
+                ]
             else:
                 # preds = torch.round(preds) + 1
                 preds = (preds + 1).cpu()

@@ -547,6 +547,8 @@ class GeneralistModel(torch.nn.Module):
         ).to(device)
         if mask:
             candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
+        else:
+            masks = None
         context_toks = self.model.tokenizer(
             data[select[0]],
             return_tensors="pt",
