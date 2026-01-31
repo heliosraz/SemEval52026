@@ -1,7 +1,10 @@
-method: grid
+method: bayes
+early_terminate:
+  min_iter: 10
+  type: hyperband
 metric:
   goal: minimize
-  name: Relative Time (Process)
+  name: valid_loss
 parameters:
   data:
     parameters:
@@ -40,6 +43,10 @@ parameters:
         values:
         - 0
         - 1
+      target_modules:
+        value:
+          - q
+          - v
   model:
     parameters:
       architecture:
@@ -53,7 +60,7 @@ parameters:
       encoder:
         value: sentence-transformers/all-distilroberta-v1
       fine_tune:
-        value: false
+        value: true
       huggingface:
         value: false
       max_len:
@@ -67,7 +74,17 @@ parameters:
       epochs:
         value: 100
       freeze_components:
-        value: null
+        parameters:
+          0:
+            parameters:
+              freeze:
+                value:
+                  - context_former
+                  - sentence_former
+              unfreeze:
+                value:
+                  - lora
+        value: 
       loss_betas:
         value:
         - 0.7
