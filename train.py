@@ -45,8 +45,9 @@ os.environ["TOKENIZERS_PARALLELISM"] = "False"
 
 task_dataset = {
     "eval": WordSenseData,
-    "finetuning": AugWordSenseData,
+    "classifier-ft": AugWordSenseData,
     "pretrain": AugWordSenseData,
+    "encoder-ft": AugWordSenseData,
 }
 model_key = {
     "GeneralistModel_nosep": models.GeneralistModel_nosep,
@@ -133,12 +134,7 @@ class Trainer:
             y_pred = torch.log_softmax(y_pred, dim=1)
         loss = self.loss_fn(y_pred, y_labels.to(device))
         y_metric = batch[self.metric_label]
-        y_preds = torch.softmax(y_pred, dim=1)
-        y_preds = [
-            sum([(i + 1) * prob for i, prob in enumerate(pred.tolist())])
-            for pred in y_preds
-        ]
-        metric = self.compute_metric(y_preds, y_metric)
+        metric = self.compute_metric(torch.argmax(y_pred, dim=1), y_metric)
         return loss, metric
 
     def run(
@@ -384,24 +380,24 @@ def main(config):
             d_attn=config["model"]["d_attn"],
             drop_attn=config["model"]["drop_attn"],
             drop_cls=config["model"]["drop_cls"],
-            device=device,
         ).to(device)
     else:
         model = base_model(
             model_name=encoder,
             max_length=config["model"]["max_len"],
             drop_cls=config["model"]["drop_cls"],
-            device=device,
         ).to(device)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
-        # lora_config = LoraConfig(
-        #     r=8,
-        #     lora_alpha=32,
-        #     target_modules=["word_embeddings", "position_embeddings", "q", "v"],
-        # )
-        # print(model.named_modules)
-        # model = LoraModel(model, lora_config, "default")
+        lora_config = LoraConfig(
+                r=config.lora["lora_r"],
+                lora_alpha=config.lora["lora_alpha"],
+                use_rslora=True if int(config.lora["use_rs"]) else False,
+                bias=config.lora["bias"],
+                target_modules=["word_embeddings", "position_embeddings", "q" ,"v"],
+        )
+        print(model.named_modules)
+        model = LoraModel(model, lora_config, "default")
 
     print_parameters(model)
 
@@ -486,6 +482,19 @@ def main(config):
 
 if __name__ == "__main__":
     train_config = read_yaml_file(argv[1])
+    sweep_configuration = {
+    "method": "grid",
+    #"metric": {"goal": "minimize", "name": "score"},
+    "parameters": {
+        "lora.lora_rank": {"values": [8, 16, 32, 64]},
+        "lora.lora_alpha": {"values": [16, 32, 64]},
+        "lora.use_rs": {"values": [0,1]},
+        "lora.bias": {"values": ["none", "lora_only"]}
+
+    },
+}
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project="2026set5")
+
     wandb_run = wandb.init(
         entity="heliosra-n-a",
         project="2026set5",
@@ -496,8 +505,10 @@ if __name__ == "__main__":
             quiet=True,
         ),
         config=train_config,
+        #sweep_id=sweep_id
     )
-
+    #sweep_id = wandb.sweep(sweep=sweep_configuration, project="2026set5")
+    #wandb.agent(sweep_id=sweep_id, function=main)
     main(wandb.config)
 
     wandb.finish()
