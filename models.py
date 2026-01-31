@@ -691,31 +691,18 @@ class SynonymModel(GeneralistModel):
         d_attn: int = 128,
         n_syns: int = 2,
         dropout_p: float = 0.4,
-        drop_cls: float = 0.4,
+        device="cpu",
     ):
-        super().__init__(model_name, max_length, d_attn, dropout_p)
-        self.name = model_name
-
-        self.drop_cls = drop_cls
+        super().__init__(model_name, max_length, d_attn, dropout_p, device)
 
         self.n_syns = n_syns
-        self.syn_length = n_syns * 2 + 2
-        self.ctx_length = max_length - self.syn_length
-        self.max_length = (
-            self.syn_length + self.ctx_length + 3
-        )  # syns | sep | ctx | wd:
-
-        self.model = ContextEmbedModule(model_name, self.max_length)
-        n = self.model.get_embedding_size()
-
-        self.K = torch.nn.Linear(n, d_attn, bias=False)
-        self.Q = torch.nn.Linear(n, d_attn, bias=False)
-        self.V = torch.nn.Linear(n, d_attn, bias=False)
-        torch.nn.init.xavier_normal_(self.K.weight)
-        torch.nn.init.xavier_normal_(self.Q.weight)
-        torch.nn.init.xavier_normal_(self.V.weight)
-        self.train_mode = False
-        self.drop_attn = dropout_p
+        self.syn_length = n_syns * 2
+        self.ctx_length = max_length - self.syn_length - 2
+        self.max_length = max_length  # syns | sep | ctx | wd:
+        # adding trainable token
+        special_tokens = {"syn_token": "[SYN]", "misc_token": "[MISC]"}
+        self.model.tokenizer.add_special_tokens(special_tokens)
+        self.model.model.resize_token_embeddings(len(self.model.tokenizer))
 
     def forward(self, data: Dict, select=["full_context", "homonym"], mask=False):
         """largely borrowed from GeneralistModule, w/ minor changes to account for change
@@ -732,7 +719,6 @@ class SynonymModel(GeneralistModel):
         sep_size = len(sep_toks["input_ids"][0])
 
         synonyms = list(map(self.wordnet_synonyms, data[select[1]]))
-
         syn_toks = self.model.tokenizer(
             synonyms,
             return_tensors="pt",
@@ -814,11 +800,8 @@ class SynonymModel(GeneralistModel):
     def wordnet_synonyms(self, w: str) -> str:
         """TODO docstring"""
         syns = wn.synonyms(w)
-        pairs = list(zip(["[SNS] "] * len(syns), set(f"{wd[0]}" for wd in syns if wd)))[
-            : self.n_syns
-        ]
-        pairs.append(("[SNS] ", "[MISC]"))
-        return "".join("".join(p) for p in pairs)
+        syns = list(set(f"{wd[0]}" for wd in syns if wd))[: self.n_syns]
+        return syns
 
 
 class PretrainedSynonymModel(PretrainedGeneralistModel):
