@@ -393,9 +393,10 @@ def main(config):
             drop_cls=config["model"]["drop_cls"],
             device=device,
         ).to(device)
+    print_parameters(model)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
-    if config["training"].get("lora", 0):
+    if config.get("lora", 0):
         lora_config = LoraConfig(
             r=config.lora["lora_r"],
             lora_alpha=config.lora["lora_alpha"],
@@ -403,10 +404,7 @@ def main(config):
             bias=config.lora["bias"],
             target_modules=config.lora["target_modules"],
         )
-        print(model.named_modules)
         model = LoraModel(model, lora_config, "default")
-
-    print_parameters(model)
 
     ## Training Parameters
     loss_fn = get_loss_fn(**config.training)

@@ -58,7 +58,7 @@ parameters:
       drop_cls:
         value: 0.3
       encoder:
-        value: sentence-transformers/all-distilroberta-v1
+        value: sentence-transformers/all-roberta-large-v1
       fine_tune:
         value: true
       huggingface:
@@ -106,7 +106,7 @@ parameters:
               weight_decay:
                 value: 0.1
       prev_path:
-        value: top_models/cce-all-distilroberta-v1.safetensors
+        value: top_models/cce-all-roberta-large-v1.safetensors
       save_total_limit:
         value: 3
       scheduler_type:
