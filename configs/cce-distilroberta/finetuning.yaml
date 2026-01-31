@@ -58,3 +58,10 @@ training:
   save_total_limit: 3  # Maximum number of checkpoints to save
   
   freeze_components: null
+
+lora:
+  #LoRA params
+  lora_r: 8
+  lora_alpha: 32
+  use_rs: 1
+  bias: "none"

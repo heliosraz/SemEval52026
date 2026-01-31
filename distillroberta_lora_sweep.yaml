@@ -1,0 +1,109 @@
+method: grid
+metric:
+  goal: minimize
+  name: Relative Time (Process)
+parameters:
+  data:
+    parameters:
+      input_tags:
+        value:
+        - source
+        - target
+      label_tag:
+        value: probs
+      metric_tag:
+        value: interval
+      root_dir:
+        value: none
+      train_data:
+        value: data/train_ft.json
+      val_data:
+        value: data/dev_ft.json
+  lora:
+    parameters:
+      bias:
+        values:
+        - none
+        - lora_only
+      lora_alpha:
+        values:
+        - 32
+        - 64
+        - 256
+      lora_r:
+        values:
+        - 8
+        - 16
+        - 64
+        - 128
+      use_rs:
+        values:
+        - 0
+        - 1
+  model:
+    parameters:
+      architecture:
+        value: CrossContextSimilarityModule
+      d_attn:
+        value: null
+      drop_attn:
+        value: null
+      drop_cls:
+        value: 0.3
+      encoder:
+        value: sentence-transformers/all-distilroberta-v1
+      fine_tune:
+        value: false
+      huggingface:
+        value: false
+      max_len:
+        value: 512
+      name:
+        value: ft-CCE
+      wrapper:
+        value: null
+  training:
+    parameters:
+      epochs:
+        value: 100
+      freeze_components:
+        value: null
+      loss_betas:
+        value:
+        - 0.7
+        - 0.999
+      loss_reduction:
+        value: batchmean
+      loss_type:
+        value: KLDivLoss
+      lr_others:
+        value: 3e-05
+      masking:
+        value: 0
+      param_groups:
+        parameters:
+          encoder:
+            parameters:
+              layers:
+                value:
+                - context_former
+                - sentence_former
+              lr:
+                value: 1e-05
+              weight_decay:
+                value: 0.1
+      prev_path:
+        value: top_models/cce-all-distilroberta-v1.safetensors
+      save_total_limit:
+        value: 3
+      scheduler_type:
+        value: cosine
+      task:
+        value: finetuning
+      train_batch_size:
+        value: 64
+      warmup_ratio:
+        value: 0.05
+      weight_decay_other:
+        value: 0.01
+program: train.py
