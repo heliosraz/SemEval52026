@@ -22,7 +22,15 @@ data:
     - "target"
   label_tag: "probs"
   metric_tag: "interval"
-
+  
+lora:
+    bias: lora_only
+    lora_alpha: 256
+    lora_r: 128
+    use_rs: 1
+    target_modules:
+        - query
+        - value
 
 training:
   # Pretrained Model Path
@@ -57,11 +65,10 @@ training:
   # Checkpoint Management
   save_total_limit: 3  # Maximum number of checkpoints to save
   
-  freeze_components: null
-
-lora:
-  #LoRA params
-  lora_r: 8
-  lora_alpha: 32
-  use_rs: 1
-  bias: "none"
+  freeze_components:
+    0:
+      freeze:
+          - context_former
+          - sentence_former
+      unfreeze:
+          - lora

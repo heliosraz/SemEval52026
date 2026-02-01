@@ -23,6 +23,15 @@ data:
   label_tag: "probs"
   metric_tag: "interval"
 
+lora:
+    bias: lora_only
+    lora_alpha: 256
+    lora_r: 128
+    use_rs: 1
+    target_modules:
+        - q
+        - v
+
 
 training:
   # Pretrained Model Path
