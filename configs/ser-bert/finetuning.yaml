@@ -38,8 +38,8 @@ training:
   loss_betas:
     - 0.7
     - 0.999
-  loss_reduction: "mean"
-  masking: 1
+  loss_reduction: "batchmean"
+  masking: 0
   
   # Learning Rate and Weight Decay
   
@@ -72,15 +72,74 @@ training:
   freeze_components:
     0:
       freeze:
+        - classifier
+      unfreeze:
         - base_model
-      unfreeze: []
-    1:
+    50:
+      freeze:
+        - base_model
+        - classifier.layers.0
+      unfreeze:
+        - classifier.layers.1
+    51:
+      freeze: []
+      unfreeze:
+        - classifier.layers.0
+    52:
       freeze: []
       unfreeze:
         - K
         - V
         - Q
-    2:
+    53:
       freeze: []
       unfreeze:
-        - encoder
+        - encoder.layer.11
+    54:
+      freeze: []
+      unfreeze:
+        - encoder.layer.10
+    55:
+      freeze: []
+      unfreeze:
+        - encoder.layer.9
+    56:
+      freeze: []
+      unfreeze:
+        - encoder.layer.8
+    57:
+      freeze: []
+      unfreeze:
+        - encoder.layer.7
+    58:
+      freeze: []
+      unfreeze:
+        - encoder.layer.6
+    59:
+      freeze: []
+      unfreeze:
+        - encoder.layer.5
+    60:
+      freeze: []
+      unfreeze:
+        - encoder.layer.4
+    61:
+      freeze: []
+      unfreeze:
+        - encoder.layer.3
+    62:
+      freeze: []
+      unfreeze:
+        - encoder.layer.2
+    63:
+      freeze: []
+      unfreeze:
+        - encoder.layer.1
+    64:
+      freeze: []
+      unfreeze:
+        - encoder.layer.0
+    65:
+      freeze: []
+      unfreeze:
+        - model.embeddings

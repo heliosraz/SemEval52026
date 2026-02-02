@@ -353,7 +353,7 @@ class GeneralistModel_nosep(torch.nn.Module):
         self,
         model_name="google-bert/bert-base-cased",
         max_length=512,
-        d_attn=128,
+        d_attn=768,
         dropout_p=0.4,
         device="cpu",
     ):
@@ -471,7 +471,7 @@ class GeneralistModel(torch.nn.Module):
         self,
         model_name="google-bert/bert-base-cased",
         max_length=512,
-        d_attn=128,
+        d_attn=768,
         dropout_p=0.4,
         device="cpu",
     ):
@@ -628,7 +628,7 @@ class ModuleWrapper(torch.nn.Module, ABC):
         base_name="google-bert/bert-base-cased",
         hidden_sizes=[50],
         max_length=512,
-        d_attn=128,
+        d_attn=768,
         drop_attn=0.0,
         drop_cls=0.0,
         device="cpu",
@@ -640,7 +640,7 @@ class ModuleWrapper(torch.nn.Module, ABC):
             base_name, max_length, d_attn, dropout_p=drop_attn, device=self.device
         )
         self.classifier = ClassifierModule(
-            input_len=d_attn * 2, hidden_sizes=hidden_sizes, dropout=drop_cls
+            input_len=d_attn, hidden_sizes=hidden_sizes, dropout=drop_cls
         )
 
     @abstractmethod
@@ -651,6 +651,11 @@ class ModuleWrapper(torch.nn.Module, ABC):
 class GeneralistModelScored(ModuleWrapper):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.classifier = ClassifierModule(
+            input_len=kwargs["d_attn"] * 2,
+            hidden_sizes=kwargs["hidden_sizes"],
+            dropout=kwargs["drop_cls"],
+        )
 
     def forward(self, data, select=["full_context", "judged_meaning"], mask=False):
         if mask:
@@ -666,7 +671,7 @@ class GeneralistModelScored(ModuleWrapper):
 
 
 class PretrainedGeneralistModel(ModuleWrapper):
-    def __init__(self, d_attn=128, drop_cls=0.3, hidden_sizes=[50], **kwargs):
+    def __init__(self, d_attn=768, drop_cls=0.3, hidden_sizes=[50], **kwargs):
         super().__init__(d_attn=d_attn, **kwargs)
         vocab_size = self.base_model.get_vocab_size()
         self.classifier = ClassifierModule(
@@ -698,7 +703,7 @@ class SynonymModel(GeneralistModel):
         self,
         model_name: str = "google-bert/bert-base-cased",
         max_length: int = 512,
-        d_attn: int = 128,
+        d_attn: int = 768,
         n_syns: int = 4,
         dropout_p: float = 0.4,
         device="cpu",
@@ -721,6 +726,45 @@ class SynonymModel(GeneralistModel):
 
         self.model.tokenizer.add_special_tokens(special_tokens)
         self.model.model.resize_token_embeddings(len(self.model.tokenizer))
+
+    def scaled_dot_product_attention(
+        self,
+        query,
+        key,
+        value,
+        attn_mask=None,
+        dropout_p=0.3,
+        is_causal=False,
+        scale=None,
+        enable_gqa=False,
+    ) -> torch.Tensor:
+        b, L, S = query.size(0), query.size(-2), key.size(-2)
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        attn_bias = torch.zeros(b, L, S, dtype=query.dtype, device=query.device)
+        if is_causal:
+            assert attn_mask is None
+            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-1e9"))
+            else:
+                attn_mask = attn_mask.bool()
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-1e9"))
+
+        if enable_gqa:
+            key = key.repeat_interleave(query.size(-3) // key.size(-3), -3)
+            value = value.repeat_interleave(query.size(-3) // value.size(-3), -3)
+
+        attn_weight = query @ key.transpose(-2, -1) * scale_factor
+        attn_weight += attn_bias
+        attn_weight = torch.softmax(attn_weight, dim=-1)
+        targ = torch.argmax(attn_weight[:, :, -1], dim=1)
+        attn_weight = torch.nn.functional.dropout(
+            attn_weight, dropout_p, training=self.training
+        )
+        return attn_weight @ value, targ
 
     def forward(
         self,
@@ -892,7 +936,7 @@ class SynonymModel(GeneralistModel):
 
         # build attention mask
         attn_mask = torch.bmm(
-            interleaved_syns["attention_mask"][:, syn_inds.long(), :].unsqueeze(2),
+            interleaved_syns["attention_mask"][:, syn_inds.long()].unsqueeze(2),
             torch.cat(
                 [
                     context_toks["attention_mask"],
@@ -903,15 +947,14 @@ class SynonymModel(GeneralistModel):
         )
 
         # run attention
-        x = self.scaled_dot_product_attention(
+        x, attn_targets = self.scaled_dot_product_attention(
             refined_syns,
             refined_ctx,
             aggre_value,
             attn_mask=attn_mask,
             dropout_p=self.drop_attn,
         )
-        masks = []
-        return x, masks
+        return x[torch.arange(batch_size), attn_targets, :]
 
     def wordnet_synonyms(self, w: str) -> list:
         """given a word, retrieve the synsets and grab the first
@@ -934,9 +977,9 @@ class ScoredSynonymModel(ModuleWrapper):
         else:
             x = self.base_model(data, select, mask=mask)
 
-        y = self.classifier(x[torch.argmax(x[:, -1]), :-1])
+        y = self.classifier(x)
 
-        return y, mask_res if mask else y
+        return (y, mask_res) if mask else y
 
 
 class PretrainedSynonymModel(PretrainedGeneralistModel):
@@ -945,7 +988,7 @@ class PretrainedSynonymModel(PretrainedGeneralistModel):
         base_type=SynonymModel,
         base_name="google-bert/bert-base-cased",
         max_length=512,
-        d_attn=128,
+        d_attn=768,
         hidden_sizes=[50],
         drop_attn=0.4,
         drop_cls=0.4,
