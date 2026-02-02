@@ -689,7 +689,7 @@ class SynonymModel(GeneralistModel):
         model_name: str = "google-bert/bert-base-cased",
         max_length: int = 512,
         d_attn: int = 128,
-        n_syns: int = 2,
+        n_syns: int = 4,
         dropout_p: float = 0.4,
         device="cpu",
     ):
@@ -697,97 +697,143 @@ class SynonymModel(GeneralistModel):
 
         self.n_syns = n_syns
         self.syn_length = n_syns * 2
-        self.ctx_length = max_length - self.syn_length - 2
-        self.max_length = max_length  # syns | sep | ctx | wd:
+        self.def_length = max_length // 3
+        self.ctx_length = max_length - self.syn_length - self.def_length - 1
+        self.wd_length = 1
+        self.max_length = max_length
+        
         # adding trainable token
-        special_tokens = {"syn_token": "[SYN]", "misc_token": "[MISC]"}
+        special_tokens = {"additional_special_tokens": ["<SYN>", "<MISC>"]}
+        
         self.model.tokenizer.add_special_tokens(special_tokens)
         self.model.model.resize_token_embeddings(len(self.model.tokenizer))
 
-    def forward(self, data: Dict, select=["full_context", "homonym"], mask=False):
+    def forward(self, data: Dict, select=["full_context", "homonym", "judged_meaning"], mask=False):
         """largely borrowed from GeneralistModule, w/ minor changes to account for change
         in model
         """
+    
+        # special token processing
         data["sep"] = [self.model.tokenizer.sep_token] * len(data[select[1]])
+        syn, misc = self.model.tokenizer.additional_special_tokens
+        data["syn"] = [[syn] * self.n_syns] * len(data[select[1]])
+        data["misc"] = [misc] * len(data[select[1]])
 
+        syn_tags = self.model.tokenizer(
+            data["syn"], return_tensors="pt", padding=False).to(self.device)
+
+        misc_toks = self.model.tokenizer(data["misc"], return_tensors="pt", padding=False).to(self.device)
+        
         sep_toks = self.model.tokenizer(
             data["sep"], return_tensors="pt", padding=False
         ).to(self.device)
+        
         sep_toks["attention_mask"] = torch.zeros(sep_toks["attention_mask"].shape).to(
             self.device
         )
         sep_size = len(sep_toks["input_ids"][0])
 
+        # synonym tokenization
         synonyms = list(map(self.wordnet_synonyms, data[select[1]]))
-        syn_toks = self.model.tokenizer(
-            synonyms,
-            return_tensors="pt",
-            padding="max_length",
-            max_length=self.syn_length,
-            truncation=True,
-        ).to(self.device)
+       
+        syn_toks = {"input_ids":[], "attention_mask":[]}
+        for inst in synonyms:
 
+            inst_toks = self.model.tokenizer(
+                inst,
+                return_tensors="pt",
+                padding="max_length",
+                max_length=1,
+                truncation=True,
+            ).to(self.device)
+            syn_toks["input_ids"].append(inst_toks["input_ids"])
+            syn_toks["attention_mask"].append(inst_toks["attention_mask"])
+            
+        # context tokenization
         context_toks = self.model.tokenizer(
             data[select[0]],
             return_tensors="pt",
             padding="max_length",
             truncation=True,
-            max_length=self.ctx_length - sep_size - 3,
+            max_length=self.ctx_length - sep_size - self.wd_length,
         ).to(self.device)
-        word_toks = self.model.tokenizer(
-            data[select[1]],
-            return_tensors="pt",
+
+
+        def_toks = self.model.tokenizer(
+            data[select[2]],
+            return_tensor="pt",
             padding="max_length",
-            max_length=3,
             truncation=True,
-        ).to(self.device)
+            max_length = self.def_length, 
+        )
 
-        if mask:
-            syn_toks, masks = self.model.mask(synonyms, syn_toks)
+        #TODO - revisit the efficacy of masked LM as pre-training task for SER
+        # if mask:
+        #     syn_toks, masks = self.model.mask(synonyms, syn_toks)
 
+
+        # interleave [SYN] tags and syns
+        interleaved_syns = torch.cat(syn_tags, syn_toks).flatten()
+
+        # cat the tokenizations into single sequence 
         input_seq = {
             "input_ids": torch.concat(
                 [
-                    syn_toks["input_ids"],
+                    interleaved_syns["input_ids"],
+                    misc_toks["input_ids"],
                     sep_toks["input_ids"],
                     context_toks["input_ids"],
-                    word_toks["input_ids"],
+                    def_toks["input_ids"],
                 ],
                 axis=1,
             ),
             "attention_mask": torch.concat(
                 [
-                    syn_toks["attention_mask"],
+                    interleaved_syns["attention_mask"],
+                    misc_toks["attention_mask"],
                     sep_toks["attention_mask"],
                     context_toks["attention_mask"],
-                    word_toks["attention_mask"],
+                    def_toks["attention_mask"],
                 ],
                 axis=1,
             ),
         }
 
+        # contextembed forward
         input_embeds = self.model(input_seq, tokenize=False)
+
+        # capture synonym tag (+ MISC) indices
+        syn_inds = torch.arange(0,self.syn_length,2,input_embeds)
+        syn_inds = torch.concat(syn_inds, self.syn_length)
+
+        # capture delimiters for pre-sep, post-sep ctx, and final definition
         sep_inds = [
-            (len(candi), len(candi) + len(sep))
-            for candi, sep in zip(syn_toks["input_ids"], sep_toks["input_ids"])
+            (len(candi), prectx := (len(candi) + len(sep)), prectx + len(ctx))
+            for candi, sep, ctx in zip(syn_toks["input_ids"], sep_toks["input_ids"], context_toks["input_ids"])
         ]
 
-        synonym_embeds = []
+        # accumulate embeddings + stack into tensor, pooling definition embeds
         context_embeds = []
-        for i in range(input_embeds.shape[0]):
-            start, end = sep_inds[i]
-            synonym_embeds.append(input_embeds[i, :start, :])
-            context_embeds.append(input_embeds[i, end:, :])
+        for i in range(input_embeds.shape[0]): 
+            _, seploc, ctxend  = sep_inds[i] 
+            context_embeds.append(torch.cat(input_embeds[i, seploc:, ctxend],
+                                            torch.nn.functional.avg_pool1d(input_embeds[i,ctxend:,:], 1), dim=0))
         context_embeds = torch.stack(context_embeds)
-        synonym_embeds = torch.stack(synonym_embeds)
+        synonym_embeds = input_embeds[:,syn_inds,:]        
 
-        # TODO post-refiner attn layers
+
+        # attention projections
         refined_ctx = self.K(context_embeds)
         refined_syns = self.Q(synonym_embeds)
         aggre_value = self.V(context_embeds)
-        # TODO attn mask
-        attn_mask = []
+        
+        # build attention mask
+        attn_mask = torch.bmm(
+            refined_syns["attention_mask"].unsqueeze(2),
+            refined_ctx["attention_mask"].unsqueeze(1),
+        )
 
+        # run attention
         x = self.scaled_dot_product_attention(
             refined_syns,
             refined_ctx,
@@ -797,13 +843,32 @@ class SynonymModel(GeneralistModel):
         )
         return x, masks
 
-    def wordnet_synonyms(self, w: str) -> str:
-        """TODO docstring"""
-        syns = wn.synonyms(w)
-        syns = list(set(f"{wd[0]}" for wd in syns if wd))[: self.n_syns]
+    def wordnet_synonyms(self, w: str) -> list:
+        """given a word, retrieve the synsets and grab the first
+        word within each (giving us synonyms).
+        TODO lemmatize
+        TODO is there a better indicator of representative word than idx=0
+        NOTE we might need this to not be in the form of list[list[str]]"""
+        synsets = wn.synonyms(w)
+        print(f"{w}: {synsets}")
+        syns = list(set(f"{wd[0]}" for wd in synsets if wd))[: self.n_syns]
         return syns
 
+class ScoredSynonymModel(ModuleWrapper):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
+    def forward(self, data, select=["full_context", "judged_meaning"], mask=False):
+        if mask:
+            x, mask_res = self.base_model(data, select, mask=mask)
+        else:
+            x = self.base_model(data, select, mask=mask)
+
+        y = self.classifier(x[torch.argmax(x[:,-1]),:-1])
+            
+        return y, mask_res if mask else y
+        
+    
 class PretrainedSynonymModel(PretrainedGeneralistModel):
     def __init__(
         self,
@@ -823,7 +888,7 @@ class PretrainedSynonymModel(PretrainedGeneralistModel):
         self.train_mode = False
         self.drop_cls = drop_cls
 
-    def forward(self, data: Dict, select=["full_context", "homonym"], mask=True):
+    def forward(self, data: Dict, select=["full_context", "homonym", "judged_meaning"], mask=True):
         x, mask_res = self.base_model(
             data, mask=mask, select=select
         )  # [batch, q_seq, d_embed] x [batch, k_seq, d_embed].T x [batch, k_seq, d_embed] -> [16, q_seq, d_attn]

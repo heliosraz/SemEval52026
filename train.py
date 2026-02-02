@@ -55,6 +55,7 @@ model_key = {
     "BaselineModule": models.BaselineModule,
     "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
     "SynonymModel": models.SynonymModel,
+    "ScoredSynonymModel": models.ScoredSynonymModel,
     "PretrainedSynonymModel": models.PretrainedSynonymModel,
     "GeneralistModelScored": models.GeneralistModelScored,
 }
@@ -393,7 +394,8 @@ def main(config):
             drop_cls=config["model"]["drop_cls"],
             device=device,
         ).to(device)
-    print_parameters(model)
+
+    #print_parameters(model)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
     if config.get("lora", 0):
