@@ -2,7 +2,7 @@ model:
   name: "SER"
   encoder: "google-bert/bert-base-cased"
   architecture: "SynonymModel"
-  wrapper: "PretrainedSynonymModel"
+  wrapper: "ScoredSynonymModel"
   hidden_sizes:
     - 50
   d_attn: 768
@@ -13,8 +13,8 @@ model:
 
 data:
   root_dir: "."
-  train_data: "data/pretraining/train_augmented.json"
-  val_data: "data/pretraining/dev_augmented.json"
+  train_data: "data/train_ft.json"
+  val_data: "data/dev_ft.json"
   input_tags:
     - "source"
     - "target"
@@ -23,8 +23,8 @@ data:
 
 training:
   # Pretrained Model Path
-  prev_path: "null"  # Use null for training from scratch, or path/repo for fine-tuning
-  task: "classifier-ft"
+  prev_path: null  # Use null for training from scratch, or path/repo for fine-tuning
+  task: "finetuning"
   
   # Training Parameters
   train_batch_size: 64
@@ -41,11 +41,24 @@ training:
   masking: 1
   
   # Learning Rate and Weight Decay
-  lr_encoder: !!float 1e-5
-  lr_attn: !!float 5e-5
+  
+# Learning Rate and Weight Decay
+  param_groups:
+    encoder:
+      layers:
+        - model.model
+      lr: !!float 1e-5
+      weight_decay: 0.1
+    attn:
+      layers:
+        - K
+        - Q
+        - V
+      lr: !!float 5e-5
+      weight_decay: 0.1
   lr_others: !!float 3e-5
-  weight_decay_encoder: 0.1
-  weight_decay_other: 0.01
+  weight_decay_other: 0.01  
+ 
       
   # Checkpoint Management
   save_total_limit: 3  # Maximum number of checkpoints to save
