@@ -37,6 +37,7 @@ def ft_data(path):
     aug_data = {
         "target": [],
         "source": [],
+        "homonym": [],
         "stdev": [],
         "average": [],
         "probs": [],
@@ -45,6 +46,7 @@ def ft_data(path):
     for _, row in data.iterrows():
         aug_data["target"] += [row["judged_meaning"]]
         aug_data["source"] += [row["context"]]
+        aug_data["homonym"] += [row["homonym"]]
         aug_data["stdev"] += [row["stdev"]]
         aug_data["average"] += [row["average"] - 1]
         stdev = torch.Tensor([row["stdev"]])
@@ -70,6 +72,7 @@ def mlm_data(path):
     aug_data = {
         "target": [],
         "source": [],
+        "homonym": [],
         "stdev": [],
         "average": [],
         "probs": [],
@@ -83,6 +86,7 @@ def mlm_data(path):
                 aug_data["target"] += [target, reference]
                 aug_data["source"] += [reference, reference]
                 aug_data["stdev"] += [row["stdev"], 0]
+                aug_data["homonym"] += [row["homonym"], row["homonym"]]
                 aug_data["average"] += [row["average"] - 1, 4]
                 stdev = torch.Tensor([row["stdev"], 0])
                 average = torch.Tensor([row["average"], 5]) - 1
@@ -94,6 +98,7 @@ def mlm_data(path):
                 ]
             aug_data["target"] += [row["judged_meaning"]]
             aug_data["source"] += [row["example_sentence"]]
+            aug_data["homonym"] += [row["homonym"]]
             aug_data["stdev"] += [0]
             aug_data["average"] += [4]
             stdev = torch.Tensor([0])

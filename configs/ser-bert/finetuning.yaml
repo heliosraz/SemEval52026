@@ -17,6 +17,7 @@ data:
   val_data: "data/dev_ft.json"
   input_tags:
     - "source"
+    - "homonym"
     - "target"
   label_tag: "probs"
   metric_tag: "interval"
