@@ -16,8 +16,8 @@ model:
 data:
   # Directory Paths
   root_dir: "none"
-  train_data: "data/train_augmented.json"
-  val_data: "data/dev_augmented.json"
+  train_data: "data/train_mlm.json"
+  val_data: "data/dev_mlm.json"
   input_tags:
     - "source"
     - "target"

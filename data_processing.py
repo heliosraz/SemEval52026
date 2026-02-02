@@ -32,7 +32,9 @@ def sample_distribution(mean, stdev, n_labels=5):
 def ft_data(path):
     split, _ = path.split("/")[-1].split(".")
     data = load_data(path)
-    data["context"] = data["precontext"] + " " + data["sentence"] + " " + data["ending"]
+    data["full_context"] = (
+        data["precontext"] + " " + data["sentence"] + " " + data["ending"]
+    )
 
     aug_data = {
         "target": [],
@@ -45,7 +47,7 @@ def ft_data(path):
     }
     for _, row in data.iterrows():
         aug_data["target"] += [row["judged_meaning"]]
-        aug_data["source"] += [row["context"]]
+        aug_data["source"] += [row["full_context"]]
         aug_data["homonym"] += [row["homonym"]]
         aug_data["stdev"] += [row["stdev"]]
         aug_data["average"] += [row["average"] - 1]
@@ -67,7 +69,9 @@ def ft_data(path):
 def mlm_data(path):
     split, _ = path.split("/")[-1].split(".")
     data = load_data(path)
-    data["context"] = data["precontext"] + " " + data["sentence"] + " " + data["ending"]
+    data["full_context"] = (
+        data["precontext"] + " " + data["sentence"] + " " + data["ending"]
+    )
 
     aug_data = {
         "target": [],
@@ -80,7 +84,7 @@ def mlm_data(path):
     }
     for _, row in data.iterrows():
         for target, reference in itertools.product(
-            [row["judged_meaning"]], [row["context"], row["ending"]]
+            [row["judged_meaning"]], [row["full_context"], row["ending"]]
         ):
             if target and reference:
                 aug_data["target"] += [target, reference]

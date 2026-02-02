@@ -544,6 +544,7 @@ class GeneralistModel(torch.nn.Module):
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2 - sep_size,
+            add_special_tokens=False,
         ).to(self.device)
         if mask:
             candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
@@ -552,6 +553,7 @@ class GeneralistModel(torch.nn.Module):
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2,
+            add_special_tokens=False,
         ).to(self.device)
         sep_toks["attention_mask"] = torch.zeros(sep_toks["attention_mask"].shape).to(
             self.device
