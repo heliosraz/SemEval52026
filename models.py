@@ -424,6 +424,7 @@ class GeneralistModel_nosep(torch.nn.Module):
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2,
+            add_special_tokens=False,
         ).to(self.device)
         if mask:
             candidate_toks, masks = self.model.mask(data[select[1]], candidate_toks)
@@ -432,6 +433,7 @@ class GeneralistModel_nosep(torch.nn.Module):
             return_tensors="pt",
             padding="max_length",
             max_length=self.max_length // 2,
+            add_special_tokens=False,
         ).to(self.device)
         # separate by [SEP] and feed each into refiner
         candidate_embeds = self.model(candidate_toks, tokenize=False)
@@ -536,7 +538,10 @@ class GeneralistModel(torch.nn.Module):
     ):
         data["sep"] = [self.model.tokenizer.sep_token] * len(data[select[0]])
         sep_toks = self.model.tokenizer(
-            data["sep"], return_tensors="pt", padding=False
+            data["sep"],
+            return_tensors="pt",
+            padding=False,
+            add_special_tokens=False,
         ).to(self.device)
         sep_size = len(sep_toks["input_ids"][0])
         candidate_toks = self.model.tokenizer(
@@ -705,7 +710,9 @@ class SynonymModel(GeneralistModel):
         self.n_syns = n_syns
         self.syn_length = n_syns * 2
         self.def_length = max_length // 3
-        self.ctx_length = max_length - self.syn_length - self.def_length - 1
+        self.ctx_length = (
+            max_length - self.syn_length - self.def_length - 1
+        )  # max_length-syn_length - def_length - misc
         self.wd_length = 1
         self.max_length = max_length
 
@@ -750,10 +757,19 @@ class SynonymModel(GeneralistModel):
         )
         sep_size = len(sep_toks["input_ids"][0])
 
+        # context tokenization
+        context_toks = self.model.tokenizer(
+            data[select[0]],
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            max_length=self.ctx_length - sep_size,
+            add_special_tokens=False,
+        ).to(self.device)
+
         syn_toks = {"input_ids": [], "attention_mask": []}
         syn_tags = {"input_ids": [], "attention_mask": []}
-        context_toks = {"input_ids": [], "attention_mask": []}
-        for word, tags, ctx in zip(data[select[1]], data["syn"], data[select[0]]):
+        for word, tags in zip(data[select[1]], data["syn"]):
             word_syns = self.wordnet_synonyms(word)
             if word_syns:
                 # synonym tokenization
@@ -783,23 +799,11 @@ class SynonymModel(GeneralistModel):
                     "input_ids": torch.Tensor().to(self.device),
                     "attention_mask": torch.Tensor().to(self.device),
                 }
-            # context tokenization
-            ctx_ids = self.model.tokenizer(
-                ctx,
-                return_tensors="pt",
-                padding="max_length",
-                truncation=True,
-                max_length=self.max_length
-                - (len(word_syns) * 2 + 1 + sep_size + self.def_length),
-                add_special_tokens=False,
-            ).to(self.device)
 
             syn_toks["input_ids"].append(syn_ids["input_ids"].flatten())
             syn_toks["attention_mask"].append(syn_ids["attention_mask"].flatten())
             syn_tags["input_ids"].append(tag_ids["input_ids"].flatten())
             syn_tags["attention_mask"].append(tag_ids["attention_mask"].flatten())
-            context_toks["input_ids"].append(ctx_ids["input_ids"])
-            context_toks["attention_mask"].append(ctx_ids["attention_mask"])
 
         def_toks = self.model.tokenizer(
             data[select[2]],
@@ -814,13 +818,29 @@ class SynonymModel(GeneralistModel):
         #     syn_toks, masks = self.model.mask(synonyms, syn_toks)
 
         # interleave [SYN] tags and syns
-        interleaved_syns = {
-            key: [
-                torch.stack([tag_inst, syn_inst]).T.flatten()
-                for tag_inst, syn_inst in zip(syn_tags[key], syn_toks[key])
-            ]
-            for key in ["input_ids", "attention_mask"]
-        }
+        interleaved_syns = {"input_ids": [], "attention_mask": []}
+        for key in ["input_ids", "attention_mask"]:
+            for tag_inst, syn_inst in zip(syn_tags[key], syn_toks[key]):
+                raw_inst = torch.stack([tag_inst, syn_inst]).T.flatten()
+                padded_inst = torch.cat(
+                    [
+                        raw_inst,
+                        torch.Tensor(
+                            [
+                                self.model.tokenizer.pad_token_id
+                                for _ in range(self.syn_length - raw_inst.shape[-1])
+                            ]
+                        ).to(self.device),
+                    ]
+                )
+                interleaved_syns[key].append(padded_inst)
+
+        interleaved_syns["input_ids"] = torch.stack(
+            interleaved_syns["input_ids"]
+        ).long()
+        interleaved_syns["attention_mask"] = torch.stack(
+            interleaved_syns["attention_mask"]
+        )
 
         # cat the tokenizations into single sequence
         compiled_input = {
@@ -846,30 +866,23 @@ class SynonymModel(GeneralistModel):
 
         # capture synonym tag (+ MISC) indices
         syn_inds = torch.arange(0, self.syn_length, step=2)
-        syn_inds = torch.concat([syn_inds, torch.Tensor([self.syn_length])]).long()
+        syn_inds = torch.concat([syn_inds, torch.Tensor([self.syn_length])])
 
         # capture delimiters for pre-sep, post-sep ctx, and final definition
-        sep_inds = [
-            (len(candi), prectx := (len(candi) + len(sep)), prectx + ctx.shape[-1])
-            for candi, sep, ctx in zip(
-                syn_toks["input_ids"], sep_toks["input_ids"], context_toks["input_ids"]
-            )
-        ]
+        sep_inds = (
+            prectx_len := interleaved_syns["input_ids"].shape[-1] + 1,
+            prectx_len + context_toks["input_ids"].shape[-1],
+        )
 
         # accumulate embeddings + stack into tensor, pooling definition embeds
-        context_embeds = []
-        for i in range(input_embeds.shape[0]):
-            _, seploc, ctxend = sep_inds[i]
-            context_embeds.append(
-                torch.cat(
-                    [
-                        input_embeds[i, seploc : seploc + self.ctx_length, :],
-                        torch.mean(input_embeds[i, ctxend:, :], dim=0).unsqueeze(0),
-                    ],
-                    dim=0,
-                )
-            )
-        context_embeds = torch.stack(context_embeds)
+        seploc, ctxend = sep_inds
+        context_embeds = torch.cat(
+            [
+                input_embeds[:, seploc:ctxend, :],
+                torch.mean(input_embeds[:, ctxend:, :], dim=1).unsqueeze(1),
+            ],
+            dim=1,
+        )
         synonym_embeds = input_embeds[:, syn_inds.long(), :]
 
         # attention projections
@@ -879,9 +892,13 @@ class SynonymModel(GeneralistModel):
 
         # build attention mask
         attn_mask = torch.bmm(
-            interleaved_syns["attention_mask"].unsqueeze(2),
+            interleaved_syns["attention_mask"][:, syn_inds.long(), :].unsqueeze(2),
             torch.cat(
-                [context_toks["attention_mask"], torch.ones(batch_size, 1)], dim=1
+                [
+                    context_toks["attention_mask"],
+                    torch.ones(batch_size, 1).to(self.device),
+                ],
+                dim=1,
             ).unsqueeze(1),
         )
 
