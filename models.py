@@ -649,12 +649,14 @@ class ModuleWrapper(torch.nn.Module, ABC):
 
 
 class GeneralistModelScored(ModuleWrapper):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, drop_cls=0.3, hidden_sizes=[50], d_attn=768, **kwargs):
+        super().__init__(
+            drop_cls=drop_cls, hidden_sizes=hidden_sizes, d_attn=d_attn, **kwargs
+        )
         self.classifier = ClassifierModule(
-            input_len=kwargs["d_attn"] * 2,
-            hidden_sizes=kwargs["hidden_sizes"],
-            dropout=kwargs["drop_cls"],
+            input_len=d_attn * 2,
+            hidden_sizes=hidden_sizes,
+            dropout=drop_cls,
         )
 
     def forward(self, data, select=["full_context", "judged_meaning"], mask=False):
@@ -936,7 +938,13 @@ class SynonymModel(GeneralistModel):
 
         # build attention mask
         attn_mask = torch.bmm(
-            interleaved_syns["attention_mask"][:, syn_inds.long()].unsqueeze(2),
+            torch.cat(
+                [
+                    interleaved_syns["attention_mask"][:, syn_inds[:-1].long()],
+                    torch.ones(batch_size, 1).to(self.device),
+                ],
+                dim=1,
+            ).unsqueeze(2),
             torch.cat(
                 [
                     context_toks["attention_mask"],

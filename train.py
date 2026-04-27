@@ -163,7 +163,7 @@ class Trainer:
         delta_hits = 0
         prev_vloss = 1_000_000.0
 
-        best_vloss = 1_000_000.0
+        best_tacc = 0.0
         for epoch in tqdm(range(n_epochs), desc="Epochs:", position=0):
             if str(epoch) in self.freeze_schedule:
                 # Freeze
@@ -218,11 +218,11 @@ class Trainer:
                     "valid_acc": running_vacc / len(self.dev_set),
                 }
             )
-
+            avg_tacc = running_tacc / len(self.train_set)
             # Track best performance, and save the model's state
-            if avg_vloss < best_vloss:
+            if avg_tacc > best_tacc:
                 print("Logging model...")
-                best_vloss = avg_vloss
+                best_tacc = avg_tacc
                 state_dict = self.get_state_dict()
                 self.top_k.append(state_dict)
                 if len(self.top_k) > self.k:
@@ -395,7 +395,7 @@ def main(config):
             device=device,
         ).to(device)
 
-    #print_parameters(model)
+    # print_parameters(model)
     if config.training["prev_path"]:
         load_model(model, config.training["prev_path"])
     if config.get("lora", 0):

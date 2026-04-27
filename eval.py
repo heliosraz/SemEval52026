@@ -29,6 +29,7 @@ model_key = {
     "BaselineModule": models.BaselineModule,
     "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
     "SynonymModel": models.SynonymModel,
+    "ScoredSynonymModel": models.ScoredSynonymModel,
     "PretrainedSynonymModel": models.PretrainedSynonymModel,
     "GeneralistModelScored": models.GeneralistModelScored,
 }

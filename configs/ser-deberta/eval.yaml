@@ -1,6 +1,7 @@
 model:
+  # Model Configuration
   name: "SER"
-  encoder: "google-bert/bert-base-cased"
+  encoder: "microsoft/deberta-v3-base" # Hugging Face model
   architecture: "SynonymModel"
   wrapper: "ScoredSynonymModel"
   hidden_sizes:
@@ -25,7 +26,7 @@ data:
 
 evaluation:
   # Pretrained Model Path and Task
-  prev_path: "checkpoint/SER_bert-base-cased/20260202_164945/SER_bert-base-cased_2.safetensors"
+  prev_path: "checkpoint/SER_deberta-v3-base/20260202_201041/SER_deberta-v3-base_2.safetensors"
   task: "eval"
   
   # Training Parameters

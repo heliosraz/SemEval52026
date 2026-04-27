@@ -1,0 +1,150 @@
+model:
+  name: "SER"
+  encoder: "microsoft/deberta-v3-base"
+  architecture: "SynonymModel"
+  wrapper: "ScoredSynonymModel"
+  hidden_sizes:
+    - 50
+  d_attn: 768
+  drop_attn: 0.4
+  drop_cls: 0.3
+  fine_tune: false
+  max_len: 512
+
+data:
+  root_dir: "."
+  train_data: "data/train_ft.json"
+  val_data: "data/dev_ft.json"
+  input_tags:
+    - "source"
+    - "homonym"
+    - "target"
+  label_tag: "probs"
+  metric_tag: "interval"
+
+training:
+  # Pretrained Model Path
+  prev_path: null  # Use null for training from scratch, or path/repo for fine-tuning
+  task: "finetuning"
+  
+  # Training Parameters
+  train_batch_size: 64
+  epochs: 100
+  warmup_ratio: 0.05
+  scheduler_type: "cosine"  # Options: linear, cosine, constant
+  
+  # Loss Function Configuration
+  loss_type: "KLDivLoss"
+  loss_betas:
+    - 0.7
+    - 0.999
+  loss_reduction: "batchmean"
+  masking: 0
+  
+  # Learning Rate and Weight Decay
+  
+# Learning Rate and Weight Decay
+  param_groups:
+    encoder:
+      layers:
+        - model.model
+      lr: !!float 1e-5
+      weight_decay: 0.1
+    attn:
+      layers:
+        - K
+        - Q
+        - V
+      lr: !!float 5e-5
+      weight_decay: 0.1
+  lr_others: !!float 3e-5
+  weight_decay_other: 0.01  
+ 
+      
+  # Checkpoint Management
+  save_total_limit: 3  # Maximum number of checkpoints to save
+  
+  # Advanced Training Settings
+  size_sup: -1
+  shuffle: true
+  random_drop: true
+  
+  freeze_components:
+    0:
+      freeze:
+        - classifier
+      unfreeze:
+        - base_model
+    50:
+      freeze:
+        - base_model
+        - classifier.layers.0
+      unfreeze:
+        - classifier.layers.1
+    51:
+      freeze: []
+      unfreeze:
+        - classifier.layers.0
+    52:
+      freeze: []
+      unfreeze:
+        - K
+        - V
+        - Q
+    53:
+      freeze: []
+      unfreeze:
+        - LayerNorm
+        - rel_embeddings
+    54:
+      freeze: []
+      unfreeze:
+        - encoder.layer.11
+    55:
+      freeze: []
+      unfreeze:
+        - encoder.layer.10
+    56:
+      freeze: []
+      unfreeze:
+        - encoder.layer.9
+    57:
+      freeze: []
+      unfreeze:
+        - encoder.layer.8
+    58:
+      freeze: []
+      unfreeze:
+        - encoder.layer.7
+    59:
+      freeze: []
+      unfreeze:
+        - encoder.layer.6
+    60:
+      freeze: []
+      unfreeze:
+        - encoder.layer.5
+    61:
+      freeze: []
+      unfreeze:
+        - encoder.layer.4
+    62:
+      freeze: []
+      unfreeze:
+        - encoder.layer.3
+    63:
+      freeze: []
+      unfreeze:
+        - encoder.layer.2
+    64:
+      freeze: []
+      unfreeze:
+        - encoder.layer.1
+    65:
+      freeze: []
+      unfreeze:
+        - encoder.layer.0
+    66:
+      freeze: []
+      unfreeze:
+        - model.embeddings
