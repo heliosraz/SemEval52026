@@ -1,9 +1,15 @@
 import nltk
+from nltk import NLTKWordTokenizer
 import json
 from collections import Counter
 
 nltk.download("punkt_tab")
 nltk.download("averaged_perceptron_tagger_eng")
+_nltk_tokenizer = NLTKWordTokenizer()
+
+
+def tok_span(text: str):
+    return _nltk_tokenizer.span_tokenize(text)
 
 
 def tok_tag(text: str):
@@ -12,7 +18,7 @@ def tok_tag(text: str):
 
 if __name__ == "__main__":
     homonym_counts = Counter()
-    with open("test.json") as f:
+    with open("data/test.json") as f:
         test_json = json.load(f)
         for inst in test_json:
             for field in [
@@ -22,7 +28,13 @@ if __name__ == "__main__":
                 "ending",
                 "example_sentence",
             ]:
-                test_json[inst][field] = tok_tag(test_json[inst][field])
+                tags = tok_tag(test_json[inst][field])
+                spans = tok_span(test_json[inst][field])
+                test_json[inst][field] = [
+                    (tok, tag, span[0], span[1])
+                    for (tok, tag), span in zip(tags, spans)
+                ]
+
             hom = test_json[inst]["homonym"]
             # print(hom)
             # get homonym tag from sentence and put it in the homonym field
@@ -32,6 +44,6 @@ if __name__ == "__main__":
             ][0]
             homonym_counts[test_json[inst]["homonym"][1]] += 1
 
-    with open("test_tags.json", "w") as f:
+    with open("data/test_tags.json", "w") as f:
         json.dump(test_json, f)
     print(homonym_counts, homonym_counts.total())
