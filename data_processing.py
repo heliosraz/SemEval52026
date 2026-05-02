@@ -4,7 +4,6 @@ import itertools
 import torch
 import yaml
 
-
 #             y_batch = torch.Tensor(batch["average"])-1
 #             y_stdev = torch.Tensor(batch["stdev"])
 #             y_stdev = y_stdev.masked_fill(y_stdev==0,1e-20)
@@ -140,8 +139,8 @@ def read_yaml_file(file_path):
 
 if __name__ == "__main__":
     root = os.path.join(".", "data")
-    for f_name in ["train.json", "dev.json"]:
-        # add_context(os.path.join(root, f_name))
-        ft_data(os.path.join(root, f_name))
-        mlm_data(os.path.join(root, f_name))
+    for f_name in ["test.json"]:
+        add_context(os.path.join(root, f_name))
+        # ft_data(os.path.join(root, f_name))
+        # mlm_data(os.path.join(root, f_name))
 #

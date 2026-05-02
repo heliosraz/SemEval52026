@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "CCE"
+  name: "CCE.distilroberta"
   encoder: "sentence-transformers/all-distilroberta-v1" # Hugging Face model
   architecture: "CrossContextSimilarityModule"
   huggingface: False
@@ -20,6 +20,9 @@ data:
     - "full_context"
     - "example_sentence"
   label_tag: "average"
+  eval_tags:
+    judged_meaning: 
+      - "DEFN"
 
 
 evaluation:

@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "CCE"
+  name: "CCE.minilm"
   encoder: "sentence-transformers/all-MiniLM-L12-v2" # Hugging Face model
   architecture: "CrossContextSimilarityModule"
   huggingface: False
@@ -20,6 +20,9 @@ data:
     - "full_context"
     - "example_sentence"
   label_tag: "average"
+  eval_tags:
+    judged_meaning: 
+      - "DEFN"
 
 
 evaluation:

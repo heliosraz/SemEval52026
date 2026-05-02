@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "CCE"
+  name: "CCE.mpnet"
   encoder: "sentence-transformers/all-mpnet-base-v2" # Hugging Face model
   architecture: "CrossContextSimilarityModule"
   huggingface: False
@@ -14,12 +14,15 @@ model:
 
 data:
   # Directory Paths
-  data: "data/dev.json"
+  data: "data/test.json"
   output: "output/"
   input_tags:
     - "full_context"
-    - "example_sentence"
+    - "judged_meaning"
   label_tag: "average"
+  eval_tags:
+    judged_meaning: 
+      - "DEFN"
 
 
 evaluation:

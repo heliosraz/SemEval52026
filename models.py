@@ -317,6 +317,7 @@ class CrossContextSimilarityModule(torch.nn.Module):
         self.context_former = ContextEmbedModule(
             model_name=model_name, max_length=max_length, device=self.device
         )
+        self.tokenizer = self.context_former.tokenizer
         self.sentence_former = SentenceEmbedModule(
             model_name=model_name, device=self.device
         )
@@ -326,7 +327,13 @@ class CrossContextSimilarityModule(torch.nn.Module):
             input_len=max_length, hidden_sizes=[128], dropout=drop_cls
         )
 
-    def forward(self, data: Dict, select=["full_context", "judged_meaning"], **kwargs):
+    def forward(
+        self,
+        data: Dict,
+        select=["full_context", "judged_meaning"],
+        return_sim=False,
+        **kwargs,
+    ):
         # full_context gets fed into bert to get contextual embeddings
         content_embed = self.context_former(data[select[0]])
         # example_sentence/definition fed into sbert to get pooled contextual embeddings
@@ -335,7 +342,10 @@ class CrossContextSimilarityModule(torch.nn.Module):
         # similarities = self.sim(content_embed, candidate_embed.unsqueeze(1)).unsqueeze(
         #     -1
         # )
+
         similarities = torch.bmm(content_embed, candidate_embed.unsqueeze(-1))
+        if return_sim:
+            return similarities.flatten().tolist()
         # feed similarities into scorer
         y = self.scorer(similarities.transpose(1, 2))
         return y.squeeze(1)
@@ -531,10 +541,14 @@ class GeneralistModel(torch.nn.Module):
         attn_weight = torch.nn.functional.dropout(
             attn_weight, dropout_p, training=self.training
         )
-        return attn_weight @ value
+        return attn_weight @ value, attn_weight
 
     def forward(
-        self, data: Dict, select=["full_context", "judged_meaning"], mask=False
+        self,
+        data: Dict,
+        select=["full_context", "judged_meaning"],
+        mask=False,
+        return_sim=False,
     ):
         data["sep"] = [self.model.tokenizer.sep_token] * len(data[select[0]])
         sep_toks = self.model.tokenizer(
@@ -606,13 +620,23 @@ class GeneralistModel(torch.nn.Module):
         )
 
         # scaled dot product with sigmoid
-        x = self.scaled_dot_product_attention(
-            query=refined_candidate,
-            key=refined_context,
-            value=aggre_value,
-            attn_mask=attn_mask,
-            dropout_p=self.drop_attn,
-        )
+        if return_sim:
+            x, sims = self.scaled_dot_product_attention(
+                query=refined_candidate,
+                key=refined_context,
+                value=aggre_value,
+                attn_mask=attn_mask,
+                dropout_p=self.drop_attn,
+            )
+            return sims.flatten().tolist()
+        else:
+            x, _ = self.scaled_dot_product_attention(
+                query=refined_candidate,
+                key=refined_context,
+                value=aggre_value,
+                attn_mask=attn_mask,
+                dropout_p=self.drop_attn,
+            )
         if mask:
             return x, masks
         return x
@@ -659,17 +683,23 @@ class GeneralistModelScored(ModuleWrapper):
             dropout=drop_cls,
         )
 
-    def forward(self, data, select=["full_context", "judged_meaning"], mask=False):
+    def forward(
+        self,
+        data,
+        select=["full_context", "judged_meaning"],
+        mask=False,
+        return_sim=False,
+    ):
         if mask:
             x, mask_res = self.base_model(data, select, mask=mask)
-        else:
-            x = self.base_model(data, select, mask=mask)
+        elif return_sim:
+            return self.base_model(data, select, mask=mask)
         x = torch.cat([x.max(dim=1)[0], x.mean(dim=1)], dim=-1)
         y = self.classifier(x)
+        res = [y]
         if mask:
-            return y, mask_res
-        else:
-            return y
+            res.append(mask_res)
+        return tuple(res)
 
 
 class PretrainedGeneralistModel(ModuleWrapper):
@@ -766,13 +796,14 @@ class SynonymModel(GeneralistModel):
         attn_weight = torch.nn.functional.dropout(
             attn_weight, dropout_p, training=self.training
         )
-        return attn_weight @ value, targ
+        return attn_weight @ value, targ, attn_weight
 
     def forward(
         self,
         data: Dict,
         select=["full_context", "homonym", "judged_meaning"],
         mask=False,
+        return_sim=False,
     ):
         """largely borrowed from GeneralistModule, w/ minor changes to account for change
         in model
@@ -955,13 +986,23 @@ class SynonymModel(GeneralistModel):
         )
 
         # run attention
-        x, attn_targets = self.scaled_dot_product_attention(
-            refined_syns,
-            refined_ctx,
-            aggre_value,
-            attn_mask=attn_mask,
-            dropout_p=self.drop_attn,
-        )
+        if return_sim:
+            _, _, sims = self.scaled_dot_product_attention(
+                refined_syns,
+                refined_ctx,
+                aggre_value,
+                attn_mask=attn_mask,
+                dropout_p=self.drop_attn,
+            )
+            return sims.flatten.tolist()
+        else:
+            x, attn_targets, _ = self.scaled_dot_product_attention(
+                refined_syns,
+                refined_ctx,
+                aggre_value,
+                attn_mask=attn_mask,
+                dropout_p=self.drop_attn,
+            )
         return x[torch.arange(batch_size), attn_targets, :]
 
     def wordnet_synonyms(self, w: str) -> list:
@@ -979,15 +1020,26 @@ class ScoredSynonymModel(ModuleWrapper):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def forward(self, data, select=["full_context", "judged_meaning"], mask=False):
+    def forward(
+        self,
+        data,
+        select=["full_context", "judged_meaning"],
+        mask=False,
+        return_sim=False,
+    ):
         if mask:
             x, mask_res = self.base_model(data, select, mask=mask)
+        elif return_sim:
+            return self.base_model(data, select, return_sim=return_sim)
         else:
-            x = self.base_model(data, select, mask=mask)
+            x = self.base_model(data, select)
 
         y = self.classifier(x)
 
-        return (y, mask_res) if mask else y
+        res = [y]
+        if mask:
+            res.append(mask_res)
+        return tuple(res)
 
 
 class PretrainedSynonymModel(PretrainedGeneralistModel):
