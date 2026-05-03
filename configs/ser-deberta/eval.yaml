@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "SER"
+  name: "SER-deberta"
   encoder: "microsoft/deberta-v3-base" # Hugging Face model
   architecture: "SynonymModel"
   wrapper: "ScoredSynonymModel"

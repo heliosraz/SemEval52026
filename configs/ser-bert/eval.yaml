@@ -1,5 +1,5 @@
 model:
-  name: "SER"
+  name: "SER-bert"
   encoder: "google-bert/bert-base-cased"
   architecture: "SynonymModel"
   wrapper: "ScoredSynonymModel"

@@ -666,13 +666,14 @@ class ModuleWrapper(torch.nn.Module, ABC):
         self.classifier = ClassifierModule(
             input_len=d_attn, hidden_sizes=hidden_sizes, dropout=drop_cls
         )
+        self.tokenizer = self.base_model.model.tokenizer
 
     @abstractmethod
     def forward(self, data, select=["full_context", "judged_meaning"], mask=True):
         pass
 
 
-class GeneralistModelScored(ModuleWrapper):
+class ScoredGeneralistModel(ModuleWrapper):
     def __init__(self, drop_cls=0.3, hidden_sizes=[50], d_attn=768, **kwargs):
         super().__init__(
             drop_cls=drop_cls, hidden_sizes=hidden_sizes, d_attn=d_attn, **kwargs
@@ -693,13 +694,12 @@ class GeneralistModelScored(ModuleWrapper):
         if mask:
             x, mask_res = self.base_model(data, select, mask=mask)
         elif return_sim:
-            return self.base_model(data, select, mask=mask)
+            return self.base_model(data, select, mask=mask, return_sim=True)
         x = torch.cat([x.max(dim=1)[0], x.mean(dim=1)], dim=-1)
         y = self.classifier(x)
-        res = [y]
         if mask:
-            res.append(mask_res)
-        return tuple(res)
+            return mask_res, y
+        return y
 
 
 class PretrainedGeneralistModel(ModuleWrapper):
@@ -758,7 +758,6 @@ class SynonymModel(GeneralistModel):
 
         self.model.tokenizer.add_special_tokens(special_tokens)
         self.model.model.resize_token_embeddings(len(self.model.tokenizer))
-        self.tokenizer = self.model.tokenizer
 
     def scaled_dot_product_attention(
         self,
@@ -995,7 +994,7 @@ class SynonymModel(GeneralistModel):
                 attn_mask=attn_mask,
                 dropout_p=self.drop_attn,
             )
-            return sims.flatten.tolist()
+            return x[torch.arange(batch_size), attn_targets, :].flatten.tolist()
         else:
             x, attn_targets, _ = self.scaled_dot_product_attention(
                 refined_syns,

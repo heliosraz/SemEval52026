@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "DXA"
+  name: "DXA-deberta"
   encoder: "microsoft/deberta-v3-base" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "GeneralistModelScored"

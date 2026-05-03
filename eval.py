@@ -130,9 +130,9 @@ def eval_sims(
     with torch.no_grad():
         for batch in tqdm(loader):
             # match tag and spans to sims
-            # match tag and spans to model tokenizer
+            # -> match tag and spans to model tokenizer
             toks = tokenize(model, batch)
-
+            # get token tags and spans from nltk
             tag_spans = gather_nltk(batch)
             for t in overwrite_tag:
                 tag_spans[t]["tag"] = [
@@ -141,12 +141,12 @@ def eval_sims(
                 tag_spans[t]["span"] = [-1 for _ in tag_spans[t]["span"]]
             matched = match_pos(toks, tag_spans)
             pos_pairs = [
-                list(product(pos_k, pos_q)) for pos_k, pos_q in zip(*matched.values())
+                list(product(pos_q, pos_k)) for pos_k, pos_q in zip(*matched.values())
             ]
 
             sims = model(batch, select, return_sim=True)
             for pairs in pos_pairs:
-                for (pos_k, pos_q), sim in zip(pairs, sims):
+                for (pos_q, pos_k), sim in zip(pairs, sims):
                     if pos_k in conf_matrix and pos_q in conf_matrix[pos_k]:
                         conf_matrix[pos_k][pos_q].append(sim)
     for k, qs in conf_matrix.items():
@@ -183,28 +183,35 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
 
 
 def show_heatmap(title, fname, data_dict: dict[str, dict[str, float]]):
-    keys = [k for k in data_dict]
-    query = [q for q in data_dict[keys[0]]]
-    data = np.array([list(q.values()) for _, q in data_dict.items()])
+    keys = sorted([k for k in data_dict])
+    query = sorted([q for q in data_dict[keys[0]]])
+    data = np.array([[data_dict[k][q] for q in query] for k in keys])
 
-    fig, ax = plt.subplots()
+    fig_w = max(4, len(query) * 0.6 + 2)
+    fig_h = max(4, len(keys) * 0.5 + 1.5)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
     im = ax.pcolorfast(data)
 
-    # Show all ticks and label them with the respective list entries
-    ax.set_yticks(np.arange(len(keys)))
-    ax.set_yticklabels(keys, fontsize=8, va="center")
+    ax.set_yticks(np.arange(len(keys)) + 0.5)
+    ax.set_yticklabels(keys, fontsize=24, va="center")
 
-    ax.set_xticks(np.arange(len(query)))
-    ax.set_xticklabels(
-        query, rotation=45, ha="right", rotation_mode="anchor", fontsize=8
-    )
+    ax.set_xticks(np.arange(len(query)) + 0.5)
+    ax.set_xticklabels(query, rotation=90, fontsize=24, ha="center")
 
-    # # Loop over data dimensions and create text annotations.
-    for i in range(len(keys)):
-        for j in range(len(query)):
-            text = ax.text(j, i, data[i, j], ha="center", va="center", color="w")
+    # for i in range(len(keys)):
+    #     for j in range(len(query)):
+    #         ax.text(
+    #             j + 0.5,
+    #             i + 0.5,
+    #             f"{data[i, j]:.2f}",
+    #             ha="center",
+    #             va="center",
+    #             color="w",
+    #             fontsize=4,
+    #         )
+
     fig.colorbar(im, ax=ax)
-
     ax.set_title(title)
     fig.tight_layout()
     plt.savefig(f"{fname}.png", dpi=150, bbox_inches="tight")

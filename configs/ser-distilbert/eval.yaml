@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "SER"
+  name: "SER-distilbert"
   encoder: "distilbert/distilbert-base-cased" # Hugging Face model
   architecture: "SynonymModel"
   wrapper: "ScoredSynonymModel"
