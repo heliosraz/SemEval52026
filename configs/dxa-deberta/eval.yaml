@@ -1,7 +1,7 @@
 model:
   # Model Configuration
   name: "DXA"
-  encoder: "google-bert/bert-base-cased" # Hugging Face model
+  encoder: "microsoft/deberta-v3-base" # Hugging Face model
   architecture: "GeneralistModel"
   wrapper: "GeneralistModelScored"
   huggingface: False
@@ -20,10 +20,10 @@ data:
     - "full_context"
     - "judged_meaning"
   label_tag: "average"
-  eval_tags:
+  eval_tags: {}
 
 
 evaluation:
   # Pretrained Model Path and Task
-  prev_path: "checkpoint/ft-DXA_bert-base-cased/20260130_143443/ft-DXA_bert-base-cased_2.safetensors"
+  prev_path: "checkpoint/ft-DXA_deberta-v3-base/20260130_143441/ft-DXA_deberta-v3-base_2.safetensors"
   task: "eval"

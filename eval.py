@@ -278,6 +278,7 @@ def main(config):
     os.makedirs(outdir, exist_ok=True)
     fp = os.path.join(outdir, "predictions.jsonl")
     # with open(fp, "w") as f:
+    #     print("results dir: {}".format(fp))
     #     f.write(result_json)
 
 

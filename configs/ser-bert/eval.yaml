@@ -21,6 +21,7 @@ data:
     - "homonym"
     - "judged_meaning"
   label_tag: "average"
+  eval_tags: {}
 
 
 evaluation:

@@ -758,6 +758,7 @@ class SynonymModel(GeneralistModel):
 
         self.model.tokenizer.add_special_tokens(special_tokens)
         self.model.model.resize_token_embeddings(len(self.model.tokenizer))
+        self.tokenizer = self.model.tokenizer
 
     def scaled_dot_product_attention(
         self,
@@ -1036,10 +1037,9 @@ class ScoredSynonymModel(ModuleWrapper):
 
         y = self.classifier(x)
 
-        res = [y]
         if mask:
-            res.append(mask_res)
-        return tuple(res)
+            return mask_res, y
+        return y
 
 
 class PretrainedSynonymModel(PretrainedGeneralistModel):

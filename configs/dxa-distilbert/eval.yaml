@@ -20,9 +20,7 @@ data:
     - "full_context"
     - "judged_meaning"
   label_tag: "average"
-  eval_tags:
-    judged_meaning: 
-      - "DEFN"
+  eval_tags: {}
 
 
 evaluation:
