@@ -2,8 +2,8 @@ model:
   # Model Configuration
   name: "DXA-bert"
   encoder: "google-bert/bert-base-cased" # Hugging Face model
-  architecture: "GeneralistModel"
-  wrapper: "GeneralistModelScored"
+  architecture: "DXAModel"
+  wrapper: "ScoredDXAModel"
   huggingface: False
   d_attn: 768
   hidden_sizes:

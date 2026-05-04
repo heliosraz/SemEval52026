@@ -13,7 +13,7 @@ from tqdm import tqdm
 from itertools import product
 import numpy as np
 import matplotlib.pyplot as plt
-from nltk_tag_script import tok_span, tok_tag, load_tagset
+from nltk_tag_script import tok_span, tok_tag, load_tagset, tok_span_and_tag
 
 torch.use_deterministic_algorithms(True)
 torch.manual_seed(0)
@@ -27,15 +27,15 @@ task_dataset = {
     "pretrain": AugWordSenseData,
 }
 model_key = {
-    "GeneralistModel_nosep": models.GeneralistModel_nosep,
-    "GeneralistModel": models.GeneralistModel,
-    "PretrainedGeneralistModel": models.PretrainedGeneralistModel,
+    "DXAModel_nosep": models.DXAModel_nosep,
+    "DXAModel": models.DXAModel,
+    "PretrainedDXAModel": models.PretrainedDXAModel,
     "BaselineModule": models.BaselineModule,
     "CrossContextSimilarityModule": models.CrossContextSimilarityModule,
     "SynonymModel": models.SynonymModel,
     "ScoredSynonymModel": models.ScoredSynonymModel,
     "PretrainedSynonymModel": models.PretrainedSynonymModel,
-    "GeneralistModelScored": models.GeneralistModelScored,
+    "ScoredDXAModel": models.ScoredDXAModel,
 }
 metric_key = {
     "mask": metrics.accuracy,
@@ -58,8 +58,12 @@ def gather_nltk(data: Dataset, select=["full_context", "judged_meaning"]):
     res = {i: {"span": [], "tag": []} for i in select}
     for ind in res:
         for txt in data[ind]:
-            res[ind]["span"].append(tok_span(txt))
-            res[ind]["tag"].append([tag[1] for tag in tok_tag(txt)])
+            try:
+                spans, tags = tok_span_and_tag(txt)
+                res[ind]["span"].append(spans)
+                res[ind]["tag"].append(tags)
+            except not tok_span(txt):
+                print(f"empty span for {txt}")
     return res
 
 
@@ -72,12 +76,12 @@ def tokenize(model, data: Dataset, select=["full_context", "judged_meaning"]):
     return res
 
 
-def match_pos(toks, tag_span):
+def match_pos(toks, tag_spans):
     res = {col: [] for col in toks}
     for col in toks:
         offsets = toks[col].pop("offset_mapping")
 
-        curr = tag_span[col]
+        curr = tag_spans[col]
 
         for (
             offset,
@@ -89,10 +93,11 @@ def match_pos(toks, tag_span):
                 curr_pos.append(tags[0])
             else:
                 for off in offset:
-                    if spans[0][0] > off[0] or off[1] > spans[0][1]:
+                    if off[0] > spans[0][1]:
                         tags.pop(0)
                         spans.pop(0)
-                    curr_pos.append(tags[0])
+                    if tags:
+                        curr_pos.append(tags[0])
             res[col].append(curr_pos)
 
     return res

@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "CCE.mpnet"
+  name: "CCE-mpnet"
   encoder: "sentence-transformers/all-mpnet-base-v2" # Hugging Face model
   architecture: "CrossContextSimilarityModule"
   huggingface: False

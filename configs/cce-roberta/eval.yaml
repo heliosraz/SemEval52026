@@ -1,6 +1,6 @@
 model:
   # Model Configuration
-  name: "CCE.roberta"
+  name: "CCE-roberta"
   encoder: "sentence-transformers/all-roberta-large-v1" # Hugging Face model
   architecture: "CrossContextSimilarityModule"
   huggingface: False
@@ -18,7 +18,7 @@ data:
   output: "output/"
   input_tags:
     - "full_context"
-    - "example_sentence"
+    - "judged_meaning"
   label_tag: "average"
   eval_tags:
     judged_meaning: 

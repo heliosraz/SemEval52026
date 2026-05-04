@@ -351,7 +351,7 @@ class CrossContextSimilarityModule(torch.nn.Module):
         return y.squeeze(1)
 
 
-class GeneralistModel_nosep(torch.nn.Module):
+class DXAModel_nosep(torch.nn.Module):
     """GLiNER inspired designed module
 
     Args:
@@ -469,7 +469,7 @@ class GeneralistModel_nosep(torch.nn.Module):
         return x, masks
 
 
-class GeneralistModel(torch.nn.Module):
+class DXAModel(torch.nn.Module):
     """GLiNER inspired designed module
 
     Args:
@@ -648,7 +648,7 @@ class GeneralistModel(torch.nn.Module):
 class ModuleWrapper(torch.nn.Module, ABC):
     def __init__(
         self,
-        base_type=GeneralistModel,
+        base_type=DXAModel,
         base_name="google-bert/bert-base-cased",
         hidden_sizes=[50],
         max_length=512,
@@ -673,7 +673,7 @@ class ModuleWrapper(torch.nn.Module, ABC):
         pass
 
 
-class ScoredGeneralistModel(ModuleWrapper):
+class ScoredDXAModel(ModuleWrapper):
     def __init__(self, drop_cls=0.3, hidden_sizes=[50], d_attn=768, **kwargs):
         super().__init__(
             drop_cls=drop_cls, hidden_sizes=hidden_sizes, d_attn=d_attn, **kwargs
@@ -702,7 +702,7 @@ class ScoredGeneralistModel(ModuleWrapper):
         return y
 
 
-class PretrainedGeneralistModel(ModuleWrapper):
+class PretrainedDXAModel(ModuleWrapper):
     def __init__(self, d_attn=768, drop_cls=0.3, hidden_sizes=[50], **kwargs):
         super().__init__(d_attn=d_attn, **kwargs)
         vocab_size = self.base_model.get_vocab_size()
@@ -725,10 +725,10 @@ class PretrainedGeneralistModel(ModuleWrapper):
         return y, mask_res
 
 
-class SynonymModel(GeneralistModel):
+class SynonymModel(DXAModel):
     """GLiNER-based model, using WordNet senses
     as the equivalent of entity tokens. Otherwise,
-    identical to the GeneralistModel implementation of GLiNER
+    identical to the DXAModel implementation of GLiNER
     """
 
     def __init__(
@@ -805,7 +805,7 @@ class SynonymModel(GeneralistModel):
         mask=False,
         return_sim=False,
     ):
-        """largely borrowed from GeneralistModule, w/ minor changes to account for change
+        """largely borrowed from DXAModule, w/ minor changes to account for change
         in model
         """
         batch_size = len(data[select[1]])
@@ -994,7 +994,7 @@ class SynonymModel(GeneralistModel):
                 attn_mask=attn_mask,
                 dropout_p=self.drop_attn,
             )
-            return x[torch.arange(batch_size), attn_targets, :].flatten.tolist()
+            return sims.flatten.tolist()
         else:
             x, attn_targets, _ = self.scaled_dot_product_attention(
                 refined_syns,
@@ -1041,7 +1041,7 @@ class ScoredSynonymModel(ModuleWrapper):
         return y
 
 
-class PretrainedSynonymModel(PretrainedGeneralistModel):
+class PretrainedSynonymModel(PretrainedDXAModel):
     def __init__(
         self,
         base_type=SynonymModel,

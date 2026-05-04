@@ -2,8 +2,8 @@ model:
   # Model Configuration
   name: "DXA-deberta"
   encoder: "microsoft/deberta-v3-base" # Hugging Face model
-  architecture: "GeneralistModel"
-  wrapper: "GeneralistModelScored"
+  architecture: "DXAModel"
+  wrapper: "ScoredDXAModel"
   huggingface: False
   d_attn: 768
   hidden_sizes:

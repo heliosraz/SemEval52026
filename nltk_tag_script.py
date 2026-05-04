@@ -14,6 +14,13 @@ def load_tagset(path="data/treebank_tagset.tsv"):
     return set(df["tag"].values)
 
 
+def tok_span_and_tag(text: str):
+    spans = list(_nltk_tokenizer.span_tokenize(text))
+    tokens = [text[s:e] for s, e in spans]  # slice tokens from spans directly
+    tags = nltk.tag.pos_tag(tokens)
+    return spans, [t[1] for t in tags]
+
+
 def tok_span(text: str):
     return list(_nltk_tokenizer.span_tokenize(text))
 
