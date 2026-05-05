@@ -275,10 +275,10 @@ def main(config, ranges):
     # Data Processing
     for low, high in ranges:
         test_df = load_data(config["data"]["data"])
-        # # filtered_test = test_df[test_df["average"].between(low, high)]
-        # test_set = task_dataset[task](filtered_test)
+        filtered_test = test_df[test_df["average"].between(low, high)]
+        test_set = task_dataset[task](filtered_test)
 
-        test_set = task_dataset[task](test_df)
+        # test_set = task_dataset[task](test_df)
         test_tagset = load_tagset()
 
         # RUN
@@ -307,8 +307,12 @@ def main(config, ranges):
 if __name__ == "__main__":
     arches_out = {}
     input_tags = {}
-    # example_types = {"negative": (1, 2), "neutral": (3, 3), "positive": (4, 5)}
-    example_types = {"all": (float("-inf"), float("inf"))}
+    example_types = {
+        "all": (float("-inf"), float("inf")),
+        "negative": (0, 2.99),
+        "neutral": (3, 3.99),
+        "positive": (4, 5),
+    }
     # gather data
     if len(argv) > 1:
         config = read_yaml_file(argv[1])
@@ -329,28 +333,27 @@ if __name__ == "__main__":
 
         for root, dirs, _ in os.walk("configs"):
             for dr in tqdm(dirs):
-                if "cce" in dr:
-                    arch, _ = dr.split("-")
-                    fp = os.path.join(root, dr, "eval.yaml")
-                    print(fp)
-                    if fp == "configs/bert-baseline/eval.yaml":
-                        continue
-                    config = read_yaml_file(fp)
-                    for example_type, (means, stds, counts, cv) in zip(
-                        example_types, main(config, example_types.values())
-                    ):
-                        if arch not in arches_out:
-                            arches_out[arch] = {}
-                        if dr not in arches_out[arch]:
-                            arches_out[arch][dr] = {}
-                        arches_out[arch][dr][example_type] = {
-                            "mean": means,
-                            "std": stds,
-                            "count": counts,
-                            "cv": cv,
-                        }
-                        if arch not in input_tags:
-                            input_tags[arch] = config["data"]["input_tags"]
+                arch, _ = dr.split("-")
+                fp = os.path.join(root, dr, "eval.yaml")
+                print(fp)
+                if fp == "configs/bert-baseline/eval.yaml":
+                    continue
+                config = read_yaml_file(fp)
+                for example_type, (means, stds, counts, cv) in zip(
+                    example_types, main(config, example_types.values())
+                ):
+                    if arch not in arches_out:
+                        arches_out[arch] = {}
+                    if dr not in arches_out[arch]:
+                        arches_out[arch][dr] = {}
+                    arches_out[arch][dr][example_type] = {
+                        "mean": means,
+                        "std": stds,
+                        "count": counts,
+                        "cv": cv,
+                    }
+                    if arch not in input_tags:
+                        input_tags[arch] = config["data"]["input_tags"]
 
     for i, (arch, bases) in enumerate(arches_out.items()):
         temp = list(bases.keys())[0]
@@ -445,12 +448,12 @@ if __name__ == "__main__":
             fig4.tight_layout()
 
             fig1.savefig(
-                f"{arch}_mean_{example_type}.png", dpi=150, bbox_inches="tight"
+                f"{arch}_mean_{example_type}.pdf", dpi=150, bbox_inches="tight"
             )
-            fig2.savefig(f"{arch}_std_{example_type}.png", dpi=150, bbox_inches="tight")
+            fig2.savefig(f"{arch}_std_{example_type}.pdf", dpi=150, bbox_inches="tight")
             fig3.savefig(
-                f"{arch}_count_{example_type}.png", dpi=150, bbox_inches="tight"
+                f"{arch}_count_{example_type}.pdf", dpi=150, bbox_inches="tight"
             )
-            fig4.savefig(f"{arch}_cv_{example_type}.png", dpi=150, bbox_inches="tight")
+            fig4.savefig(f"{arch}_cv_{example_type}.pdf", dpi=150, bbox_inches="tight")
 
             plt.close("all")
