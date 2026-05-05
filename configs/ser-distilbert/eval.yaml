@@ -22,7 +22,9 @@ data:
     - "homonym"
     - "judged_meaning"
   label_tag: "average"
-  eval_tags: {}
+  eval_tags:
+    homonym:
+      - "SYN"
 
 
 evaluation:

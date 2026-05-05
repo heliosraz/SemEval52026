@@ -76,7 +76,7 @@ def tokenize(model, data: Dataset, select=["full_context", "judged_meaning"]):
     return res
 
 
-def match_pos(toks, tag_spans):
+def match_pos(toks, tag_spans, shape, select={"full_context": 1, "judged_meaning": 0}):
     res = {col: [] for col in toks}
     for col in toks:
         offsets = toks[col].pop("offset_mapping")
@@ -98,6 +98,10 @@ def match_pos(toks, tag_spans):
                         spans.pop(0)
                     if tags:
                         curr_pos.append(tags[0])
+                if select[col] < len(shape):
+                    curr_pos = curr_pos + [
+                        "[PAD]" for _ in range(shape[select[col]] - len(offset))
+                    ]
             res[col].append(curr_pos)
 
     return res
@@ -130,28 +134,41 @@ def eval_sims(
         tag1: {tag2: 0 for tag2 in select_tagset[select[1]]}
         for tag1 in select_tagset[select[0]]
     }
+    conf_cv = {
+        tag1: {tag2: 0 for tag2 in select_tagset[select[1]]}
+        for tag1 in select_tagset[select[0]]
+    }
 
     model.eval()
     with torch.no_grad():
         for batch in tqdm(loader):
             # match tag and spans to sims
             # -> match tag and spans to model tokenizer
-            toks = tokenize(model, batch)
+            toks = tokenize(model, batch, select=select[:2])
             # get token tags and spans from nltk
-            tag_spans = gather_nltk(batch)
+            tag_spans = gather_nltk(batch, select=select[:2])
             for t in overwrite_tag:
                 tag_spans[t]["tag"] = [
                     list(select_tagset[t]) for _ in tag_spans[t]["tag"]
                 ]
                 tag_spans[t]["span"] = [-1 for _ in tag_spans[t]["span"]]
-            matched = match_pos(toks, tag_spans)
+
+            # gather similarities
+            sims, sim_shape = model(batch, select, return_sim=True)
+
+            # match up the pos from of the text toks (model specifics)
+            matched = match_pos(
+                toks,
+                tag_spans,
+                shape=sim_shape,
+                select={label: i + 1 for i, label in enumerate(select[1::-1])},
+            )
             pos_pairs = [
                 list(product(pos_q, pos_k)) for pos_k, pos_q in zip(*matched.values())
             ]
 
-            sims = model(batch, select, return_sim=True)
-            for pairs in pos_pairs:
-                for (pos_q, pos_k), sim in zip(pairs, sims):
+            for pairs, sim_inst in zip(pos_pairs, sims):
+                for (pos_q, pos_k), sim in zip(pairs, sim_inst):
                     if pos_k in conf_matrix and pos_q in conf_matrix[pos_k]:
                         conf_matrix[pos_k][pos_q].append(sim)
     for k, qs in conf_matrix.items():
@@ -159,10 +176,13 @@ def eval_sims(
             conf_mean[k][q] = np.mean(scores) if scores else 0
             conf_std[k][q] = np.std(scores) if scores else 0
             conf_count[k][q] = len(scores) if scores else 0
-    return conf_mean, conf_std, conf_count
+            conf_cv[k][q] = (
+                conf_std[k][q] / conf_mean[k][q] if conf_mean[k][q] != 0 else 0
+            )
+    return conf_mean, conf_std, conf_count, conf_cv
 
 
-def eval(model, data, select=["full_context", "judged_meaning"]):
+def evaluate(model, data, select=["full_context", "judged_meaning"]):
     loader = DataLoader(data, batch_size=64, num_workers=0, shuffle=False)
     res = pd.DataFrame(columns=["id", "prediction"])
     model.eval()
@@ -187,47 +207,48 @@ def eval(model, data, select=["full_context", "judged_meaning"]):
     return res
 
 
-def show_heatmap(title, fname, data_dict: dict[str, dict[str, float]]):
-    keys = sorted([k for k in data_dict])
-    query = sorted([q for q in data_dict[keys[0]]])
-    data = np.array([[data_dict[k][q] for q in query] for k in keys])
+def show_heatmap(
+    title,
+    data_dict: dict[str, dict[str, float]],
+    select=["full_context", "judged_meaning"],
+    fig=None,
+    ax=None,
+):
+    y = sorted([k for k in data_dict])
+    x = sorted([q for q in data_dict[y[0]]])
+    if ax is None or fig is None:
+        fig_w = max(4, len(x) * 0.8 + 2)
+        fig_h = max(4, len(y) * 0.8 + 2)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    fig_w = max(4, len(query) * 0.6 + 2)
-    fig_h = max(4, len(keys) * 0.5 + 1.5)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    data = np.array([[data_dict[y][x] for x in x] for y in y])
 
     im = ax.pcolorfast(data)
 
-    ax.set_yticks(np.arange(len(keys)) + 0.5)
-    ax.set_yticklabels(keys, fontsize=24, va="center")
+    ax.set_xticks(np.arange(len(x) + 1))  # major at edges
+    ax.set_yticks(np.arange(len(y) + 1))  # major at edges
+    ax.tick_params(which="major", length=0, labelbottom=False, labelleft=False)
+    ax.grid(which="major", color="white", linewidth=0.5)
 
-    ax.set_xticks(np.arange(len(query)) + 0.5)
-    ax.set_xticklabels(query, rotation=90, fontsize=24, ha="center")
+    ax.set_xticks(np.arange(len(x)) + 0.5, minor=True)  # minor at centers
+    ax.set_yticks(np.arange(len(y)) + 0.5, minor=True)  # minor at centers
+    ax.set_xticklabels(x, minor=True, rotation=90, fontsize=28, ha="center")
+    ax.set_yticklabels(y, minor=True, fontsize=28, va="center")
+    ax.tick_params(which="minor", length=0)
 
-    # for i in range(len(keys)):
-    #     for j in range(len(query)):
-    #         ax.text(
-    #             j + 0.5,
-    #             i + 0.5,
-    #             f"{data[i, j]:.2f}",
-    #             ha="center",
-    #             va="center",
-    #             color="w",
-    #             fontsize=4,
-    #         )
+    ax.set_ylabel(select[0], fontsize=48)
+    ax.set_xlabel(select[1], fontsize=36)
 
-    fig.colorbar(im, ax=ax)
-    ax.set_title(title)
-    fig.tight_layout()
-    plt.savefig(f"{fname}.png", dpi=150, bbox_inches="tight")
+    ax.grid(which="major", color="white", linewidth=0.5)
+
+    fig.colorbar(im, ax=ax, fraction=0.3, shrink=1, pad=0.1)
+    ax.set_title(title, fontsize=48)
+    return fig
 
 
-def main(config):
+def main(config, ranges):
     task = config["evaluation"]["task"]
     ## Model Initialization
-    name = "{}.{}".format(
-        model_key[config["model"]["architecture"]], config["model"]["encoder"]
-    )
     base_model = model_key[config["model"]["architecture"]]
     encoder = config["model"]["encoder"]
     if config["model"]["wrapper"]:
@@ -252,48 +273,184 @@ def main(config):
     overwrite_tag = config["data"]["eval_tags"]
 
     # Data Processing
-    test_df = load_data(config["data"]["data"])
-    test_set = task_dataset[task](test_df)
-    test_tagset = load_tagset()
+    for low, high in ranges:
+        test_df = load_data(config["data"]["data"])
+        # # filtered_test = test_df[test_df["average"].between(low, high)]
+        # test_set = task_dataset[task](filtered_test)
 
-    # RUN
-    # result = eval(model, test_set, config["data"]["input_tags"])
-    means, stds, counts = eval_sims(
-        model,
-        test_set,
-        config["data"]["input_tags"],
-        tagset=test_tagset,
-        overwrite_tag=overwrite_tag,
-    )
+        test_set = task_dataset[task](test_df)
+        test_tagset = load_tagset()
 
-    # display map
-    show_heatmap(
-        f"POS pair attention means for {config["model"]["name"]}",
-        f"{config["model"]["name"]}_mean",
-        means,
-    )
-    show_heatmap(
-        f"POS pair attention stdev for {config["model"]["name"]}",
-        f"{config["model"]["name"]}_stdev",
-        stds,
-    )
-    show_heatmap(
-        f"POS pair attention counts for {config["model"]["name"]}",
-        f"{config["model"]["name"]}_counts",
-        counts,
-    )
+        # RUN
+        # result = evaluate(model, test_set, config["data"]["input_tags"])
+        means, stds, counts, cv = eval_sims(
+            model=model,
+            data=test_set,
+            select=config["data"]["input_tags"],
+            tagset=test_tagset,
+            overwrite_tag=overwrite_tag,
+        )
 
-    # Saving
-    # result_json = result.to_json(orient="records", lines=True)
+        # Saving
+        # result_json = result.to_json(orient="records", lines=True)
 
-    outdir = os.path.join(config["data"]["output"], config["model"]["name"])
-    os.makedirs(outdir, exist_ok=True)
-    fp = os.path.join(outdir, "predictions.jsonl")
-    # with open(fp, "w") as f:
-    #     print("results dir: {}".format(fp))
-    #     f.write(result_json)
+        outdir = os.path.join(config["data"]["output"], config["model"]["name"])
+        os.makedirs(outdir, exist_ok=True)
+        fp = os.path.join(outdir, f"{config["model"]["name"]}_predictions.jsonl")
+        # with open(fp, "w") as f:
+        #     print("results dir: {}".format(fp))
+        #     f.write(result_json)
+
+        yield means, stds, counts, cv
 
 
 if __name__ == "__main__":
-    config = read_yaml_file(argv[1])
-    main(config)
+    arches_out = {}
+    input_tags = {}
+    # example_types = {"negative": (1, 2), "neutral": (3, 3), "positive": (4, 5)}
+    example_types = {"all": (float("-inf"), float("inf"))}
+    # gather data
+    if len(argv) > 1:
+        config = read_yaml_file(argv[1])
+        arch, _ = config["model"]["name"].split("-")
+        arch = arch.lower()
+        means, stds, counts, cv = main(config)
+        if arch not in arches_out:
+            arches_out[arch] = {}
+        arches_out[arch][config["model"]["name"]] = {
+            "mean": means,
+            "std": stds,
+            "count": counts,
+        }
+        input_tags[arch] = config["data"]["input_tags"]
+
+    else:
+        import os
+
+        for root, dirs, _ in os.walk("configs"):
+            for dr in tqdm(dirs):
+                if "cce" in dr:
+                    arch, _ = dr.split("-")
+                    fp = os.path.join(root, dr, "eval.yaml")
+                    print(fp)
+                    if fp == "configs/bert-baseline/eval.yaml":
+                        continue
+                    config = read_yaml_file(fp)
+                    for example_type, (means, stds, counts, cv) in zip(
+                        example_types, main(config, example_types.values())
+                    ):
+                        if arch not in arches_out:
+                            arches_out[arch] = {}
+                        if dr not in arches_out[arch]:
+                            arches_out[arch][dr] = {}
+                        arches_out[arch][dr][example_type] = {
+                            "mean": means,
+                            "std": stds,
+                            "count": counts,
+                            "cv": cv,
+                        }
+                        if arch not in input_tags:
+                            input_tags[arch] = config["data"]["input_tags"]
+
+    for i, (arch, bases) in enumerate(arches_out.items()):
+        temp = list(bases.keys())[0]
+        for example_type in example_types:
+            # plt init
+            query = sorted([q for q in bases[temp][example_type]["mean"]])
+            keys = sorted([k for k in bases[temp][example_type]["mean"][query[0]]])
+            fig_w = max(5, len(keys) * 0.8 + 2)
+            fig_h = max(5, len(query) * 0.8 + 2)
+            fig1, mean_axes = plt.subplots(
+                1, len(bases), figsize=(fig_w * len(bases), fig_h)
+            )
+            fig2, std_axes = plt.subplots(
+                1, len(bases), figsize=(fig_w * len(bases), fig_h)
+            )
+            fig3, count_axes = plt.subplots(
+                1, len(bases), figsize=(fig_w * len(bases), fig_h)
+            )
+
+            fig4, cv_axes = plt.subplots(
+                1, len(bases), figsize=(fig_w * len(bases), fig_h)
+            )
+
+            mean_axes = np.atleast_1d(mean_axes)
+            std_axes = np.atleast_1d(std_axes)
+            count_axes = np.atleast_1d(count_axes)
+            cv_axes = np.atleast_1d(cv_axes)
+
+            for j, model_n in enumerate(bases):
+                show_heatmap(
+                    model_n,
+                    bases[model_n][example_type]["mean"],
+                    input_tags[arch],
+                    fig1,
+                    mean_axes[j],
+                )
+                show_heatmap(
+                    model_n,
+                    bases[model_n][example_type]["std"],
+                    input_tags[arch],
+                    fig2,
+                    std_axes[j],
+                )
+                show_heatmap(
+                    model_n,
+                    bases[model_n][example_type]["count"],
+                    input_tags[arch],
+                    fig3,
+                    count_axes[j],
+                )
+                show_heatmap(
+                    model_n,
+                    bases[model_n][example_type]["cv"],
+                    input_tags[arch],
+                    fig4,
+                    cv_axes[j],
+                )
+
+            key, query, *_ = input_tags[arch]
+            fig1.suptitle(
+                "Mean of <{}, {}> {} Example Pairs \n Similarity Scores for {}".format(
+                    key, query, example_type.capitalize(), arch.upper()
+                ),
+                fontsize=60,
+                y=1.02,
+            )
+            fig2.suptitle(
+                "Standard Deviation of <{}, {}> {} Example Pairs \n Similarity Scores for {}".format(
+                    key, query, example_type.capitalize(), arch.upper()
+                ),
+                fontsize=60,
+                y=1.02,
+            )
+            fig3.suptitle(
+                "Counts of <{}, {}> {} Example Pairs \n Similarity Scores for {}".format(
+                    key, query, example_type.capitalize(), arch.upper()
+                ),
+                fontsize=60,
+                y=1.02,
+            )
+
+            fig4.suptitle(
+                "CV of <{}, {}> {} Example Pairs \n Similarity Scores for {}".format(
+                    key, query, example_type.capitalize(), arch.upper()
+                ),
+                fontsize=60,
+                y=1.02,
+            )
+            fig1.tight_layout()
+            fig2.tight_layout()
+            fig3.tight_layout()
+            fig4.tight_layout()
+
+            fig1.savefig(
+                f"{arch}_mean_{example_type}.png", dpi=150, bbox_inches="tight"
+            )
+            fig2.savefig(f"{arch}_std_{example_type}.png", dpi=150, bbox_inches="tight")
+            fig3.savefig(
+                f"{arch}_count_{example_type}.png", dpi=150, bbox_inches="tight"
+            )
+            fig4.savefig(f"{arch}_cv_{example_type}.png", dpi=150, bbox_inches="tight")
+
+            plt.close("all")

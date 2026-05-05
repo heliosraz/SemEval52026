@@ -10,7 +10,7 @@ _nltk_tokenizer = NLTKWordTokenizer()
 
 
 def load_tagset(path="data/treebank_tagset.tsv"):
-    df = pd.read_csv(path, sep="\t", names=["tag", "name", "example"])
+    df = pd.read_csv(path, sep="\t", names=["tag", "name"])
     return set(df["tag"].values)
 
 

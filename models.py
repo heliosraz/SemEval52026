@@ -345,7 +345,7 @@ class CrossContextSimilarityModule(torch.nn.Module):
 
         similarities = torch.bmm(content_embed, candidate_embed.unsqueeze(-1))
         if return_sim:
-            return similarities.flatten().tolist()
+            return similarities.tolist(), similarities.shape
         # feed similarities into scorer
         y = self.scorer(similarities.transpose(1, 2))
         return y.squeeze(1)
@@ -628,7 +628,7 @@ class DXAModel(torch.nn.Module):
                 attn_mask=attn_mask,
                 dropout_p=self.drop_attn,
             )
-            return sims.flatten().tolist()
+            return sims.flatten(-2).tolist(), sims.shape
         else:
             x, _ = self.scaled_dot_product_attention(
                 query=refined_candidate,
@@ -695,6 +695,8 @@ class ScoredDXAModel(ModuleWrapper):
             x, mask_res = self.base_model(data, select, mask=mask)
         elif return_sim:
             return self.base_model(data, select, mask=mask, return_sim=True)
+        else:
+            x = self.base_model(data, select, mask=mask)
         x = torch.cat([x.max(dim=1)[0], x.mean(dim=1)], dim=-1)
         y = self.classifier(x)
         if mask:
@@ -986,23 +988,16 @@ class SynonymModel(DXAModel):
         )
 
         # run attention
+        x, attn_targets, sims = self.scaled_dot_product_attention(
+            refined_syns,
+            refined_ctx,
+            aggre_value,
+            attn_mask=attn_mask,
+            dropout_p=self.drop_attn,
+        )
         if return_sim:
-            _, _, sims = self.scaled_dot_product_attention(
-                refined_syns,
-                refined_ctx,
-                aggre_value,
-                attn_mask=attn_mask,
-                dropout_p=self.drop_attn,
-            )
-            return sims.flatten.tolist()
-        else:
-            x, attn_targets, _ = self.scaled_dot_product_attention(
-                refined_syns,
-                refined_ctx,
-                aggre_value,
-                attn_mask=attn_mask,
-                dropout_p=self.drop_attn,
-            )
+            res = sims[torch.arange(batch_size), attn_targets, :]
+            return res.tolist(), res.shape
         return x[torch.arange(batch_size), attn_targets, :]
 
     def wordnet_synonyms(self, w: str) -> list:
